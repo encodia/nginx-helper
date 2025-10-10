@@ -23,5 +23,10 @@
 	},
 	"require-dev": {
 		"wpreadme2markdown/wpreadme2markdown": "*"
+	},
+	"config": {
+		"allow-plugins": {
+			"composer/installers": true
+		}
 	}
 }
