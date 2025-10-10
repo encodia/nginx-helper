@@ -408,7 +408,7 @@ class Nginx_Helper_Admin {
 			return true;
 		}
 		
-		if ( defined( 'NGINX_HELPER_LOG' ) && true === NGINX_HELPER_LOG ) {
+		if ( defined( 'ENCODIA_NGINX_HELPER_LOG_ENABLED' ) && true === ENCODIA_NGINX_HELPER_LOG_ENABLED ) {
 			return true;
 		}
 		
