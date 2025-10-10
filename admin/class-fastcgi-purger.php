@@ -77,42 +77,18 @@ class FastCGI_Purger extends Purger {
 					$_url_purge .= '?' . $parse['query'];
 				}
 
-				$this->do_remote_get( $_url_purge );
+                $this->call_cache_purger(false, $_url_purge);;
 
 				if ( $feed && ! empty( $nginx_helper_admin->options['purge_feeds'] ) ) {
 
 					$feed_url = rtrim( $_url_purge_base, '/' ) . '/feed/';
-					$this->do_remote_get( $feed_url );
-					$this->do_remote_get( $feed_url . 'atom/' );
-					$this->do_remote_get( $feed_url . 'rdf/' );
 
+                    $this->call_cache_purger(false, $feed_url);
+                    $this->call_cache_purger(false, $feed_url . 'atom/' );
+                    $this->call_cache_purger(false, $feed_url . 'rdf/' );
 				}
 				break;
 
-		}
-		
-		if( ( is_page() || is_single() ) && $nginx_helper_admin->options['purge_amp_urls'] ) {
-			$this->purge_amp_version( $url );
-		}
-
-	}
-	
-	/**
-	 * Purge AMP version of a URL.
-	 *
-	 * @param string $url_base The base URL to purge.
-	 */
-	private function purge_amp_version( $url_base ) {
-		global $nginx_helper_admin;
-
-		$amp_url = sprintf( '%s/amp/', rtrim( $url_base, '/' ) );
-		
-		$this->log( '- Purging AMP URL | ' . $amp_url );
-		
-		if ( 'unlink_files' === $nginx_helper_admin->options['purge_method'] ) {
-			$this->delete_cache_file_for( $amp_url );
-		} else {
-			$this->do_remote_get( $amp_url );
 		}
 	}
 
@@ -173,8 +149,8 @@ class FastCGI_Purger extends Purger {
 
 							$purge_url = $_url_purge_base . $purge_url;
 							$this->log( '- Purging URL | ' . $purge_url );
-							$this->do_remote_get( $purge_url );
 
+                            $this->call_cache_purger(false, $purge_url);
 						}
 					}
 				}
@@ -184,12 +160,31 @@ class FastCGI_Purger extends Purger {
 
 	}
 
+    private function call_cache_purger(bool $all, string $url = ''): void
+    {
+        if ($all) {
+            $url = 'ALL';
+        }
+
+        $args = [
+            'headers' => [
+                'Content-Type' => 'application/x-www-form-urlencoded'
+            ],
+            'body' => [
+                'subfolder' => ENCODIA_NGINX_HELPER_CACHE_SUBFOLDER,
+                'url' => $url,
+            ]
+        ];
+
+        wp_remote_post('http://127.0.0.1:8888', $args);
+    }
+
 	/**
 	 * Purge everything.
 	 */
 	public function purge_all() {
+        $this->call_cache_purger(true);;
 
-		$this->unlink_recursive( RT_WP_NGINX_HELPER_CACHE_PATH, false );
 		$this->log( '* * * * *' );
 		$this->log( '* Purged Everything!' );
 		$this->log( '* * * * *' );

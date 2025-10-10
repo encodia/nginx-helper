@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name:       Nginx Helper
+ * Plugin Name:       Encodia Nginx Helper
  * Plugin URI:        https://rtcamp.com/nginx-helper/
  * Description:       Cleans nginx's fastcgi/proxy cache or redis-cache whenever a post is edited/published. Also does few more things.
  * Version:           2.3.5
@@ -14,6 +14,8 @@
  * @link              https://rtcamp.com/nginx-helper/
  * @since             2.0.0
  * @package           nginx-helper
+ *
+ * Based on the great plugin Nginx Helper by Rtcamp.
  */
 
 // If this file is called directly, abort.
