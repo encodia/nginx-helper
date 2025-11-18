@@ -218,6 +218,8 @@ class Nginx_Helper {
 
 		$this->loader->add_action( 'wp_ajax_rt_get_feeds', $nginx_helper_admin, 'nginx_helper_get_feeds' );
 
+		$this->loader->add_action( 'updated_option', $nginx_helper_admin, 'purge_product_cache_on_product_options_save', 10, 3 );
+
 		$this->loader->add_action( 'shutdown', $nginx_helper_admin, 'add_timestamps', 99999 );
 		$this->loader->add_action( 'add_init', $nginx_helper_admin, 'update_map' );
 

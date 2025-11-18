@@ -1127,5 +1127,71 @@ class Nginx_Helper_Admin {
 			$nginx_purger->purge_url( $product_url );
 		}
 	}
+
+	/**
+	 * Svuota la cache di tutti i prodotti quando le opzioni dei prodotti vengono salvate
+	 *
+	 * @since 9.1.0
+	 *
+	 * @param mixed  $old_value   Previous option value.
+	 * @param mixed  $value       New option value.
+	 * @param string $option_name Option being updated.
+	 */
+	public function purge_product_cache_on_product_options_save( $option_name, $old_value, $value ) {
+        if (! is_admin() || ! isset($_GET['page']) || $_GET['page'] !== 'options-product') {
+            return;
+        }
+
+        // il purge è abilitato e se esiste il cpt products
+		if ( ! $this->options['enable_purge'] || ! post_type_exists( 'product' ) ) {
+			return;
+		}
+
+		global $nginx_purger;
+
+		if ( empty( $nginx_purger ) ) {
+			return;
+		}
+
+		$total_purged   = 0;
+
+		$nginx_purger->log( 'Options-product settings updated - purging cache for every published product.' );
+
+
+        $query = new WP_Query(
+            array(
+                'post_type'      => 'product',
+                'post_status'    => 'publish',
+                'fields'         => 'ids',
+                'orderby'        => 'ID',
+                'order'          => 'ASC',
+                'posts_per_page' => -1,
+                'no_found_rows'  => true,
+            )
+        );
+
+
+        if($query->have_posts()) {
+            foreach ($query->posts as $product_id) {
+                $product_url = get_permalink($product_id);
+
+                if (!$product_url) {
+                    continue;
+                }
+                // svuota la cache del singolo prodotto
+                $nginx_purger->purge_url($product_url);
+                ++$total_purged;
+            }
+        }
+
+		wp_reset_postdata();
+
+		if ( 0 === $total_purged ) {
+			$nginx_purger->log( 'No published products detected while purging after options-product save.', 'WARNING' );
+			return;
+		}
+
+		$nginx_purger->log( sprintf( 'Purged cache for %1$d product posts after options-product save.', $total_purged ) );
+	}
 	
 }
