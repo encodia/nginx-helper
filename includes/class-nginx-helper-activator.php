@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Fired during plugin activation.
  *
@@ -16,71 +17,73 @@
 /**
  * Class Nginx_Helper_Activator
  */
-class Nginx_Helper_Activator {
+class Nginx_Helper_Activator
+{
+    /**
+     * Create log directory. Add capability of nginx helper.
+     * Schedule event to check log file size daily.
+     *
+     * @since    2.0.0
+     *
+     * @global Nginx_Helper_Admin $nginx_helper_admin
+     */
+    public static function activate()
+    {
 
-	/**
-	 * Create log directory. Add capability of nginx helper.
-	 * Schedule event to check log file size daily.
-	 *
-	 * @since    2.0.0
-	 *
-	 * @global Nginx_Helper_Admin $nginx_helper_admin
-	 */
-	public static function activate() {
+        global $nginx_helper_admin;
 
-		global $nginx_helper_admin;
+        $path = $nginx_helper_admin->functional_asset_path();
 
-		$path = $nginx_helper_admin->functional_asset_path();
+        if (! is_dir($path)) {
+            mkdir($path);
+        }
 
-		if ( ! is_dir( $path ) ) {
-			mkdir( $path );
-		}
+        if (! current_user_can('activate_plugins')) {
+            return;
+        }
 
-		if ( ! current_user_can( 'activate_plugins' ) ) {
-			return;
-		}
+        self::set_user_caps();
 
-		self::set_user_caps();
+        wp_schedule_event(time(), 'daily', 'rt_wp_nginx_helper_check_log_file_size_daily');
 
-		wp_schedule_event( time(), 'daily', 'rt_wp_nginx_helper_check_log_file_size_daily' );
-		
-		if ( method_exists( $nginx_helper_admin, 'store_default_options' ) ) {
-			$nginx_helper_admin->store_default_options();
-		}
+        if (method_exists($nginx_helper_admin, 'store_default_options')) {
+            $nginx_helper_admin->store_default_options();
+        }
 
-	}
+    }
 
-	/**
-	 * This function sets the user capabilites appropriately.
-	 */
-	public static function set_user_caps() {
+    /**
+     * This function sets the user capabilites appropriately.
+     */
+    public static function set_user_caps()
+    {
 
-		if ( ! current_user_can( 'activate_plugins' ) ) {
-			return;
-		}
+        if (! current_user_can('activate_plugins')) {
+            return;
+        }
 
-		global $nginx_helper_admin;
+        global $nginx_helper_admin;
 
-		$role = get_role( 'administrator' );
+        $role = get_role('administrator');
 
-		if ( empty( $role ) ) {
+        if (empty($role)) {
 
-			update_site_option(
-				'rt_wp_nginx_helper_init_check',
-				__( 'Sorry, you need to be an administrator to use Nginx Helper', 'nginx-helper' )
-			);
+            update_site_option(
+                'rt_wp_nginx_helper_init_check',
+                __('Sorry, you need to be an administrator to use Nginx Helper', 'nginx-helper')
+            );
 
-			return;
+            return;
 
-		}
+        }
 
-		$role->add_cap( 'Nginx Helper | Config' );
-		$role->add_cap( 'Nginx Helper | Purge cache' );
-		
-		if ( method_exists( $nginx_helper_admin, 'nginx_helper_update_role_caps' ) ) {
-			$nginx_helper_admin->nginx_helper_update_role_caps();
-		}
+        $role->add_cap('Nginx Helper | Config');
+        $role->add_cap('Nginx Helper | Purge cache');
 
-	}
+        if (method_exists($nginx_helper_admin, 'nginx_helper_update_role_caps')) {
+            $nginx_helper_admin->nginx_helper_update_role_caps();
+        }
+
+    }
 
 }

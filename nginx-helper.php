@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Plugin Name:       Encodia Nginx Helper
  * Plugin URI:        https://rtcamp.com/nginx-helper/
@@ -20,51 +21,53 @@
  */
 
 // If this file is called directly, abort.
-if ( ! defined( 'WPINC' ) ) {
-	die;
+if (! defined('WPINC')) {
+    die;
 }
 
 /**
  * Base URL of plugin
  */
-if ( ! defined( 'NGINX_HELPER_BASEURL' ) ) {
-	define( 'NGINX_HELPER_BASEURL', plugin_dir_url( __FILE__ ) );
+if (! defined('NGINX_HELPER_BASEURL')) {
+    define('NGINX_HELPER_BASEURL', plugin_dir_url(__FILE__));
 }
 
 /**
  * Base Name of plugin
  */
-if ( ! defined( 'NGINX_HELPER_BASENAME' ) ) {
-	define( 'NGINX_HELPER_BASENAME', plugin_basename( __FILE__ ) );
+if (! defined('NGINX_HELPER_BASENAME')) {
+    define('NGINX_HELPER_BASENAME', plugin_basename(__FILE__));
 }
 
 /**
  * Base PATH of plugin
  */
-if ( ! defined( 'NGINX_HELPER_BASEPATH' ) ) {
-	define( 'NGINX_HELPER_BASEPATH', plugin_dir_path( __FILE__ ) );
+if (! defined('NGINX_HELPER_BASEPATH')) {
+    define('NGINX_HELPER_BASEPATH', plugin_dir_path(__FILE__));
 }
 
 /**
  * The code that runs during plugin activation.
  * This action is documented in includes/class-nginx-helper-activator.php
  */
-function activate_nginx_helper() {
-	require_once NGINX_HELPER_BASEPATH . 'includes/class-nginx-helper-activator.php';
-	Nginx_Helper_Activator::activate();
+function activate_nginx_helper()
+{
+    require_once NGINX_HELPER_BASEPATH . 'includes/class-nginx-helper-activator.php';
+    Nginx_Helper_Activator::activate();
 }
 
 /**
  * The code that runs during plugin deactivation.
  * This action is documented in includes/class-nginx-helper-deactivator.php
  */
-function deactivate_nginx_helper() {
-	require_once NGINX_HELPER_BASEPATH . 'includes/class-nginx-helper-deactivator.php';
-	Nginx_Helper_Deactivator::deactivate();
+function deactivate_nginx_helper()
+{
+    require_once NGINX_HELPER_BASEPATH . 'includes/class-nginx-helper-deactivator.php';
+    Nginx_Helper_Deactivator::deactivate();
 }
 
-register_activation_hook( __FILE__, 'activate_nginx_helper' );
-register_deactivation_hook( __FILE__, 'deactivate_nginx_helper' );
+register_activation_hook(__FILE__, 'activate_nginx_helper');
+register_deactivation_hook(__FILE__, 'deactivate_nginx_helper');
 
 /**
  * The core plugin class that is used to define internationalization,
@@ -81,20 +84,21 @@ require NGINX_HELPER_BASEPATH . 'includes/class-nginx-helper.php';
  *
  * @since    2.0.0
  */
-function run_nginx_helper() {
+function run_nginx_helper()
+{
 
-	global $nginx_helper;
+    global $nginx_helper;
 
-	$nginx_helper = new Nginx_Helper();
-	$nginx_helper->run();
+    $nginx_helper = new Nginx_Helper();
+    $nginx_helper->run();
 
-	// Load WP-CLI command.
-	if ( defined( 'WP_CLI' ) && WP_CLI ) {
+    // Load WP-CLI command.
+    if (defined('WP_CLI') && WP_CLI) {
 
-		require_once NGINX_HELPER_BASEPATH . 'class-nginx-helper-wp-cli-command.php';
-		\WP_CLI::add_command( 'nginx-helper', 'Nginx_Helper_WP_CLI_Command' );
+        require_once NGINX_HELPER_BASEPATH . 'class-nginx-helper-wp-cli-command.php';
+        \WP_CLI::add_command('nginx-helper', 'Nginx_Helper_WP_CLI_Command');
 
-	}
+    }
 
 }
 run_nginx_helper();
