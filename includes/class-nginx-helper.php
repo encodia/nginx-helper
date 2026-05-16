@@ -39,6 +39,15 @@ class Nginx_Helper
     protected $loader;
 
     /**
+     * Minimum WordPress Version Required.
+     *
+     * @since    2.0.0
+     * @access   public
+     * @var      string    $minium_wp
+     */
+    protected $minimum_wp;
+
+    /**
      * The unique identifier of this plugin.
      *
      * @since    2.0.0
@@ -55,15 +64,6 @@ class Nginx_Helper
      * @var      string    $version    The current version of the plugin.
      */
     protected $version;
-
-    /**
-     * Minimum WordPress Version Required.
-     *
-     * @since    2.0.0
-     * @access   public
-     * @var      string    $minium_wp
-     */
-    protected $minimum_wp;
 
     /**
      * Define the core functionality of the plugin.
@@ -105,70 +105,115 @@ class Nginx_Helper
     }
 
     /**
-     * Load the required dependencies for this plugin.
-     *
-     * Include the following files that make up the plugin:
-     *
-     * - Nginx_Helper_Loader. Orchestrates the hooks of the plugin.
-     * - Nginx_Helper_i18n. Defines internationalization functionality.
-     * - Nginx_Helper_Admin. Defines all hooks for the admin area.
-     *
-     * Create an instance of the loader which will be used to register the hooks
-     * with WordPress.
-     *
-     * @since    2.0.0
-     * @access   private
+     * Dispay plugin notices.
      */
-    private function load_dependencies()
+    public function display_notices()
     {
+        ?>
+	<div id="message" class="error">
+		<p>
+			<strong>
+				<?php
+                printf(
+                    /* translators: %s is Minimum WP version. */
+                    esc_html__('Sorry, Nginx Helper requires WordPress %s or higher', 'nginx-helper'),
+                    esc_html($this->minimum_wp)
+                );
+        ?>
+			</strong>
+		</p>
+	</div>
+		<?php
+    }
 
-        /**
-         * The class responsible for orchestrating the actions and filters of the
-         * core plugin.
-         */
-        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-nginx-helper-loader.php';
+    /**
+     * The reference to the class that orchestrates the hooks with the plugin.
+     *
+     * @since     2.0.0
+     *
+     * @return Nginx_Helper_Loader Orchestrates the hooks of the plugin.
+     */
+    public function get_loader()
+    {
+        return $this->loader;
+    }
 
-        /**
-         * The class responsible for defining internationalization functionality
-         * of the plugin.
-         */
-        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-nginx-helper-i18n.php';
+    /**
+     * The name of the plugin used to uniquely identify it within the context of
+     * WordPress and to define internationalization functionality.
+     *
+     * @since     2.0.0
+     * @return    string    The name of the plugin.
+     */
+    public function get_plugin_name()
+    {
+        return $this->plugin_name;
+    }
 
-        /**
-         * The class responsible for defining all actions that required for purging urls.
-         */
-        require_once plugin_dir_path(dirname(__FILE__)) . 'admin/class-purger.php';
+    /**
+     * Retrieve the version number of the plugin.
+     *
+     * @since     2.0.0
+     * @return    string    The version number of the plugin.
+     */
+    public function get_version()
+    {
+        return $this->version;
+    }
 
-        /**
-         * The class responsible for defining all actions that occur in the admin area.
-         */
-        require_once plugin_dir_path(dirname(__FILE__)) . 'admin/class-nginx-helper-admin.php';
+    /**
+     * Detects when plugin version changes and updates accordingly.
+     */
+    public function handle_nginx_helper_upgrade()
+    {
+        $installed_version = get_option('nginx_helper_version', '0');
 
-        /**
-         * The class responsible for defining all actions that occur in the public-facing
-         * side of the site.
-         */
-        $this->loader = new Nginx_Helper_Loader();
+        if (version_compare($installed_version, $this->get_version(), '<')) {
+
+            require_once NGINX_HELPER_BASEPATH . 'includes/class-nginx-helper-activator.php';
+            Nginx_Helper_Activator::set_user_caps();
+
+            update_option('nginx_helper_version', $this->get_version());
+        }
 
     }
 
     /**
-     * Define the locale for this plugin for internationalization.
+     * Check wp version.
      *
-     * Uses the Nginx_Helper_i18n class in order to set the domain and to register the hook
-     * with WordPress.
+     * @since     2.0.0
      *
-     * @since    2.0.0
-     * @access   private
+     * @global string $wp_version
+     *
+     * @return boolean
      */
-    private function set_locale()
+    public function required_wp_version()
     {
 
-        $plugin_i18n = new Nginx_Helper_i18n();
-        $plugin_i18n->set_domain($this->get_plugin_name());
+        global $wp_version;
 
-        $this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
+        $wp_ok = version_compare($wp_version, $this->minimum_wp, '>=');
 
+        if (false === $wp_ok) {
+
+            add_action('admin_notices', array( &$this, 'display_notices' ));
+            add_action('network_admin_notices', array( &$this, 'display_notices' ));
+            return false;
+
+        }
+
+        return true;
+
+    }
+
+    /**
+     * Run the loader to execute all of the hooks with WordPress.
+     *
+     * @since    2.0.0
+     */
+    public function run()
+    {
+        $this->loader->run();
     }
 
     /**
@@ -262,114 +307,69 @@ class Nginx_Helper
     }
 
     /**
-     * Run the loader to execute all of the hooks with WordPress.
+     * Load the required dependencies for this plugin.
+     *
+     * Include the following files that make up the plugin:
+     *
+     * - Nginx_Helper_Loader. Orchestrates the hooks of the plugin.
+     * - Nginx_Helper_i18n. Defines internationalization functionality.
+     * - Nginx_Helper_Admin. Defines all hooks for the admin area.
+     *
+     * Create an instance of the loader which will be used to register the hooks
+     * with WordPress.
      *
      * @since    2.0.0
+     * @access   private
      */
-    public function run()
-    {
-        $this->loader->run();
-    }
-
-    /**
-     * The name of the plugin used to uniquely identify it within the context of
-     * WordPress and to define internationalization functionality.
-     *
-     * @since     2.0.0
-     * @return    string    The name of the plugin.
-     */
-    public function get_plugin_name()
-    {
-        return $this->plugin_name;
-    }
-
-    /**
-     * The reference to the class that orchestrates the hooks with the plugin.
-     *
-     * @since     2.0.0
-     *
-     * @return Nginx_Helper_Loader Orchestrates the hooks of the plugin.
-     */
-    public function get_loader()
-    {
-        return $this->loader;
-    }
-
-    /**
-     * Retrieve the version number of the plugin.
-     *
-     * @since     2.0.0
-     * @return    string    The version number of the plugin.
-     */
-    public function get_version()
-    {
-        return $this->version;
-    }
-
-    /**
-     * Check wp version.
-     *
-     * @since     2.0.0
-     *
-     * @global string $wp_version
-     *
-     * @return boolean
-     */
-    public function required_wp_version()
+    private function load_dependencies()
     {
 
-        global $wp_version;
+        /**
+         * The class responsible for orchestrating the actions and filters of the
+         * core plugin.
+         */
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-nginx-helper-loader.php';
 
-        $wp_ok = version_compare($wp_version, $this->minimum_wp, '>=');
+        /**
+         * The class responsible for defining internationalization functionality
+         * of the plugin.
+         */
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-nginx-helper-i18n.php';
 
-        if (false === $wp_ok) {
+        /**
+         * The class responsible for defining all actions that required for purging urls.
+         */
+        require_once plugin_dir_path(dirname(__FILE__)) . 'admin/class-purger.php';
 
-            add_action('admin_notices', array( &$this, 'display_notices' ));
-            add_action('network_admin_notices', array( &$this, 'display_notices' ));
-            return false;
+        /**
+         * The class responsible for defining all actions that occur in the admin area.
+         */
+        require_once plugin_dir_path(dirname(__FILE__)) . 'admin/class-nginx-helper-admin.php';
 
-        }
-
-        return true;
+        /**
+         * The class responsible for defining all actions that occur in the public-facing
+         * side of the site.
+         */
+        $this->loader = new Nginx_Helper_Loader();
 
     }
 
     /**
-     * Dispay plugin notices.
+     * Define the locale for this plugin for internationalization.
+     *
+     * Uses the Nginx_Helper_i18n class in order to set the domain and to register the hook
+     * with WordPress.
+     *
+     * @since    2.0.0
+     * @access   private
      */
-    public function display_notices()
+    private function set_locale()
     {
-        ?>
-	<div id="message" class="error">
-		<p>
-			<strong>
-				<?php
-                printf(
-                    /* translators: %s is Minimum WP version. */
-                    esc_html__('Sorry, Nginx Helper requires WordPress %s or higher', 'nginx-helper'),
-                    esc_html($this->minimum_wp)
-                );
-        ?>
-			</strong>
-		</p>
-	</div>
-		<?php
-    }
 
-    /**
-     * Detects when plugin version changes and updates accordingly.
-     */
-    public function handle_nginx_helper_upgrade()
-    {
-        $installed_version = get_option('nginx_helper_version', '0');
+        $plugin_i18n = new Nginx_Helper_i18n();
+        $plugin_i18n->set_domain($this->get_plugin_name());
 
-        if (version_compare($installed_version, $this->get_version(), '<')) {
-
-            require_once NGINX_HELPER_BASEPATH . 'includes/class-nginx-helper-activator.php';
-            Nginx_Helper_Activator::set_user_caps();
-
-            update_option('nginx_helper_version', $this->get_version());
-        }
+        $this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
 
     }
 }

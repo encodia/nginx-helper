@@ -1,10 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * Plugin Name:       Encodia Nginx Helper
  * Plugin URI:        https://rtcamp.com/nginx-helper/
  * Description:       Cleans nginx's fastcgi/proxy cache or redis-cache whenever a post is edited/published. Also does few more things.
- * Version:           9.1.0
+ * Version:           10.0.0
  * Original Version:  2.3.5
  * Author:            rtCamp
  * Author URI:        https://rtcamp.com
@@ -96,7 +98,7 @@ function run_nginx_helper()
     if (defined('WP_CLI') && WP_CLI) {
 
         require_once NGINX_HELPER_BASEPATH . 'class-nginx-helper-wp-cli-command.php';
-        \WP_CLI::add_command('nginx-helper', 'Nginx_Helper_WP_CLI_Command');
+        WP_CLI::add_command('nginx-helper', 'Nginx_Helper_WP_CLI_Command');
 
     }
 

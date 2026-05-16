@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * The admin-specific functionality of the plugin.
  *
@@ -20,6 +22,94 @@
 class FastCGI_Purger extends Purger
 {
     /**
+     * Function to custom purge urls.
+     */
+    public function custom_purge_urls()
+    {
+
+        global $nginx_helper_admin;
+
+        $parse = wp_parse_url(home_url());
+
+        $purge_urls = isset($nginx_helper_admin->options['purge_url']) && ! empty($nginx_helper_admin->options['purge_url']) ?
+            explode("\r\n", $nginx_helper_admin->options['purge_url']) : array();
+
+        /**
+         * Allow plugins/themes to modify/extend urls.
+         *
+         * @param array $purge_urls URLs which needs to be purged.
+         * @param bool  $wildcard   If wildcard in url is allowed or not. default false.
+         */
+        $purge_urls = apply_filters('rt_nginx_helper_purge_urls', $purge_urls, false);
+
+        switch ($nginx_helper_admin->options['purge_method']) {
+
+            case 'unlink_files':
+                $_url_purge_base = $parse['scheme'] . '://' . $parse['host'];
+
+                if (is_array($purge_urls) && ! empty($purge_urls)) {
+
+                    foreach ($purge_urls as $purge_url) {
+
+                        $purge_url = mb_trim($purge_url);
+
+                        if (mb_strpos($purge_url, '*') === false) {
+
+                            $purge_url = $_url_purge_base . $purge_url;
+                            $this->log('- Purging URL | ' . $purge_url);
+                            $this->delete_cache_file_for($purge_url);
+
+                        }
+                    }
+                }
+                break;
+
+            case 'get_request':
+                // Go to default case.
+            default:
+                $_url_purge_base = $this->purge_base_url();
+
+                if (is_array($purge_urls) && ! empty($purge_urls)) {
+
+                    foreach ($purge_urls as $purge_url) {
+
+                        $purge_url = mb_trim($purge_url);
+
+                        if (mb_strpos($purge_url, '*') === false) {
+
+                            $purge_url = $_url_purge_base . $purge_url;
+                            $this->log('- Purging URL | ' . $purge_url);
+
+                            $this->call_cache_purger(false, $purge_url);
+                        }
+                    }
+                }
+                break;
+
+        }
+
+    }
+
+    /**
+     * Purge everything.
+     */
+    public function purge_all()
+    {
+        $this->call_cache_purger(true);
+        ;
+
+        $this->log('* * * * *');
+        $this->log('* Purged Everything!');
+        $this->log('* * * * *');
+
+        /**
+         * Fire an action after the FastCGI cache has been purged.
+         *
+         * @since 2.1.0
+         */
+        do_action('rt_nginx_helper_after_fastcgi_purge_all');
+    }
+    /**
      * Function to purge url.
      *
      * @param string $url URL.
@@ -27,7 +117,6 @@ class FastCGI_Purger extends Purger
      */
     public function purge_url($url, $feed = true)
     {
-
         global $nginx_helper_admin;
 
         /**
@@ -61,7 +150,7 @@ class FastCGI_Purger extends Purger
 
                 if ($feed && ! empty($nginx_helper_admin->options['purge_feeds'])) {
 
-                    $feed_url = rtrim($_url_purge_base, '/') . '/feed/';
+                    $feed_url = mb_rtrim($_url_purge_base, '/') . '/feed/';
                     $this->delete_cache_file_for($feed_url);
                     $this->delete_cache_file_for($feed_url . 'atom/');
                     $this->delete_cache_file_for($feed_url . 'rdf/');
@@ -84,7 +173,7 @@ class FastCGI_Purger extends Purger
 
                 if ($feed && ! empty($nginx_helper_admin->options['purge_feeds'])) {
 
-                    $feed_url = rtrim($_url_purge_base, '/') . '/feed/';
+                    $feed_url = mb_rtrim($_url_purge_base, '/') . '/feed/';
 
                     $this->call_cache_purger(false, $feed_url);
                     $this->call_cache_purger(false, $feed_url . 'atom/');
@@ -93,75 +182,6 @@ class FastCGI_Purger extends Purger
                 break;
 
         }
-    }
-
-    /**
-     * Function to custom purge urls.
-     */
-    public function custom_purge_urls()
-    {
-
-        global $nginx_helper_admin;
-
-        $parse = wp_parse_url(home_url());
-
-        $purge_urls = isset($nginx_helper_admin->options['purge_url']) && ! empty($nginx_helper_admin->options['purge_url']) ?
-            explode("\r\n", $nginx_helper_admin->options['purge_url']) : array();
-
-        /**
-         * Allow plugins/themes to modify/extend urls.
-         *
-         * @param array $purge_urls URLs which needs to be purged.
-         * @param bool  $wildcard   If wildcard in url is allowed or not. default false.
-         */
-        $purge_urls = apply_filters('rt_nginx_helper_purge_urls', $purge_urls, false);
-
-        switch ($nginx_helper_admin->options['purge_method']) {
-
-            case 'unlink_files':
-                $_url_purge_base = $parse['scheme'] . '://' . $parse['host'];
-
-                if (is_array($purge_urls) && ! empty($purge_urls)) {
-
-                    foreach ($purge_urls as $purge_url) {
-
-                        $purge_url = trim($purge_url);
-
-                        if (strpos($purge_url, '*') === false) {
-
-                            $purge_url = $_url_purge_base . $purge_url;
-                            $this->log('- Purging URL | ' . $purge_url);
-                            $this->delete_cache_file_for($purge_url);
-
-                        }
-                    }
-                }
-                break;
-
-            case 'get_request':
-                // Go to default case.
-            default:
-                $_url_purge_base = $this->purge_base_url();
-
-                if (is_array($purge_urls) && ! empty($purge_urls)) {
-
-                    foreach ($purge_urls as $purge_url) {
-
-                        $purge_url = trim($purge_url);
-
-                        if (strpos($purge_url, '*') === false) {
-
-                            $purge_url = $_url_purge_base . $purge_url;
-                            $this->log('- Purging URL | ' . $purge_url);
-
-                            $this->call_cache_purger(false, $purge_url);
-                        }
-                    }
-                }
-                break;
-
-        }
-
     }
 
     private function call_cache_purger(bool $all, string $url = ''): void
@@ -181,26 +201,6 @@ class FastCGI_Purger extends Purger
         ];
 
         wp_remote_post('http://127.0.0.1:8888', $args);
-    }
-
-    /**
-     * Purge everything.
-     */
-    public function purge_all()
-    {
-        $this->call_cache_purger(true);
-        ;
-
-        $this->log('* * * * *');
-        $this->log('* Purged Everything!');
-        $this->log('* * * * *');
-
-        /**
-         * Fire an action after the FastCGI cache has been purged.
-         *
-         * @since 2.1.0
-         */
-        do_action('rt_nginx_helper_after_fastcgi_purge_all');
     }
 
     /**
@@ -225,7 +225,7 @@ class FastCGI_Purger extends Purger
         $path = apply_filters('rt_nginx_helper_fastcgi_purge_suffix', '');
 
         // Prevent users from inserting a trailing '/' that could break the url purging.
-        $path = trim($path, '/');
+        $path = mb_trim($path, '/');
 
         $purge_url_base = $parse['scheme'] . '://' . $parse['host'] . '/' . $path;
 

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * Register all actions and filters for the plugin
  *
@@ -93,6 +95,24 @@ class Nginx_Helper_Loader
     }
 
     /**
+     * Register the filters and actions with WordPress.
+     *
+     * @since    2.0.0
+     */
+    public function run()
+    {
+
+        foreach ($this->filters as $hook) {
+            add_filter($hook['hook'], array( $hook['component'], $hook['callback'] ), $hook['priority'], $hook['accepted_args']);
+        }
+
+        foreach ($this->actions as $hook) {
+            add_action($hook['hook'], array( $hook['component'], $hook['callback'] ), $hook['priority'], $hook['accepted_args']);
+        }
+
+    }
+
+    /**
      * A utility function that is used to register the actions and hooks into a single
      * collection.
      *
@@ -121,24 +141,6 @@ class Nginx_Helper_Loader
         );
 
         return $hooks;
-
-    }
-
-    /**
-     * Register the filters and actions with WordPress.
-     *
-     * @since    2.0.0
-     */
-    public function run()
-    {
-
-        foreach ($this->filters as $hook) {
-            add_filter($hook['hook'], array( $hook['component'], $hook['callback'] ), $hook['priority'], $hook['accepted_args']);
-        }
-
-        foreach ($this->actions as $hook) {
-            add_action($hook['hook'], array( $hook['component'], $hook['callback'] ), $hook['priority'], $hook['accepted_args']);
-        }
 
     }
 

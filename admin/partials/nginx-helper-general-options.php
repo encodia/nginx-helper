@@ -92,7 +92,7 @@ if (isset($all_inputs['smart_http_expire_save']) && wp_verify_nonce($all_inputs[
 
                 foreach ($nginx_settings[ $default_setting_field ] as $role_slug => $enabled) {
 
-                    $role_slug = strtolower(wp_strip_all_tags($role_slug));
+                    $role_slug = mb_strtolower(wp_strip_all_tags($role_slug));
                     if ('1' === $enabled && isset($role_names[ $role_slug ]) && ! in_array($role_slug, array( 'administrator', 'subscriber' ), true)) {
                         $filtered_roles[ $role_slug ] = 1;
                     }

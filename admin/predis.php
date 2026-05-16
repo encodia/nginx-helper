@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 // phpcs:disable
 
 /*
@@ -23,6 +25,21 @@ use InvalidArgumentException;
 interface CommandInterface
 {
     /**
+     * Gets the argument of the command at the specified index.
+     *
+     * @param int $index Index of the desired argument.
+     *
+     * @return mixed|null
+     */
+    public function getArgument($index);
+
+    /**
+     * Gets the arguments of the command.
+     *
+     * @return array
+     */
+    public function getArguments();
+    /**
      * Returns the ID of the Redis command. By convention, command identifiers
      * must always be uppercase.
      *
@@ -31,18 +48,19 @@ interface CommandInterface
     public function getId();
 
     /**
-     * Assign the specified slot to the command for clustering distribution.
-     *
-     * @param int $slot Slot ID.
-     */
-    public function setSlot($slot);
-
-    /**
      * Returns the assigned slot of the command for clustering distribution.
      *
      * @return int|null
      */
     public function getSlot();
+
+    /**
+     * Parses a raw response and returns a PHP object.
+     *
+     * @param string $data Binary string containing the whole response.
+     *
+     */
+    public function parseResponse($data);
 
     /**
      * Sets the arguments for the command.
@@ -59,29 +77,11 @@ interface CommandInterface
     public function setRawArguments(array $arguments);
 
     /**
-     * Gets the arguments of the command.
+     * Assign the specified slot to the command for clustering distribution.
      *
-     * @return array
+     * @param int $slot Slot ID.
      */
-    public function getArguments();
-
-    /**
-     * Gets the argument of the command at the specified index.
-     *
-     * @param int $index Index of the desired argument.
-     *
-     * @return mixed|null
-     */
-    public function getArgument($index);
-
-    /**
-     * Parses a raw response and returns a PHP object.
-     *
-     * @param string $data Binary string containing the whole response.
-     *
-     * @return mixed
-     */
-    public function parseResponse($data);
+    public function setSlot($slot);
 }
 
 /**
@@ -91,82 +91,8 @@ interface CommandInterface
  */
 abstract class Command implements CommandInterface
 {
-    private $slot;
     private $arguments = array();
-
-    /**
-     * Returns a filtered array of the arguments.
-     *
-     * @param array $arguments List of arguments.
-     *
-     * @return array
-     */
-    protected function filterArguments(array $arguments)
-    {
-        return $arguments;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function setArguments(array $arguments)
-    {
-        $this->arguments = $this->filterArguments($arguments);
-        unset($this->slot);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function setRawArguments(array $arguments)
-    {
-        $this->arguments = $arguments;
-        unset($this->slot);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getArguments()
-    {
-        return $this->arguments;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getArgument($index)
-    {
-        if (isset($this->arguments[$index])) {
-            return $this->arguments[$index];
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function setSlot($slot)
-    {
-        $this->slot = $slot;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getSlot()
-    {
-        if (isset($this->slot)) {
-            return $this->slot;
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function parseResponse($data)
-    {
-        return $data;
-    }
+    private $slot;
 
     /**
      * Normalizes the arguments array passed to a Redis command.
@@ -175,7 +101,7 @@ abstract class Command implements CommandInterface
      *
      * @return array
      */
-    public static function normalizeArguments(array $arguments)
+    final public static function normalizeArguments(array $arguments)
     {
         if (count($arguments) === 1 && is_array($arguments[0])) {
             return $arguments[0];
@@ -191,12 +117,86 @@ abstract class Command implements CommandInterface
      *
      * @return array
      */
-    public static function normalizeVariadic(array $arguments)
+    final public static function normalizeVariadic(array $arguments)
     {
         if (count($arguments) === 2 && is_array($arguments[1])) {
             return array_merge(array($arguments[0]), $arguments[1]);
         }
 
+        return $arguments;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function getArgument($index)
+    {
+        if (isset($this->arguments[$index])) {
+            return $this->arguments[$index];
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function getArguments()
+    {
+        return $this->arguments;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function getSlot()
+    {
+        if (isset($this->slot)) {
+            return $this->slot;
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function parseResponse($data)
+    {
+        return $data;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function setArguments(array $arguments)
+    {
+        $this->arguments = $this->filterArguments($arguments);
+        unset($this->slot);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function setRawArguments(array $arguments)
+    {
+        $this->arguments = $arguments;
+        unset($this->slot);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function setSlot($slot)
+    {
+        $this->slot = $slot;
+    }
+
+    /**
+     * Returns a filtered array of the arguments.
+     *
+     * @param array $arguments List of arguments.
+     *
+     * @return array
+     */
+    protected function filterArguments(array $arguments)
+    {
         return $arguments;
     }
 }
@@ -218,12 +218,30 @@ class ZSetRange extends Command
     /**
      * {@inheritdoc}
      */
+    public function parseResponse($data)
+    {
+        if ($this->withScores()) {
+            $result = array();
+
+            for ($i = 0; $i < count($data); $i++) {
+                $result[$data[$i]] = $data[++$i];
+            }
+
+            return $result;
+        }
+
+        return $data;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     protected function filterArguments(array $arguments)
     {
         if (count($arguments) === 4) {
             $lastType = gettype($arguments[3]);
 
-            if ($lastType === 'string' && strtoupper($arguments[3]) === 'WITHSCORES') {
+            if ($lastType === 'string' && mb_strtoupper($arguments[3]) === 'WITHSCORES') {
                 // Used for compatibility with older versions
                 $arguments[3] = array('WITHSCORES' => true);
                 $lastType = 'array';
@@ -271,25 +289,7 @@ class ZSetRange extends Command
             return false;
         }
 
-        return strtoupper($arguments[3]) === 'WITHSCORES';
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function parseResponse($data)
-    {
-        if ($this->withScores()) {
-            $result = array();
-
-            for ($i = 0; $i < count($data); $i++) {
-                $result[$data[$i]] = $data[++$i];
-            }
-
-            return $result;
-        }
-
-        return $data;
+        return mb_strtoupper($arguments[3]) === 'WITHSCORES';
     }
 }
 
@@ -477,7 +477,7 @@ class ListPopFirstBlocking extends Command
     {
         if (count($arguments) === 2 && is_array($arguments[0])) {
             list($arguments, $timeout) = $arguments;
-            array_push($arguments, $timeout);
+            $arguments[] = $timeout;
         }
 
         return $arguments;
@@ -530,7 +530,7 @@ class ServerInfo extends Command
         $infoLines = preg_split('/\r?\n/', $data);
 
         foreach ($infoLines as $row) {
-            if (strpos($row, ':') === false) {
+            if (mb_strpos($row, ':') === false) {
                 continue;
             }
 
@@ -539,43 +539,6 @@ class ServerInfo extends Command
         }
 
         return $info;
-    }
-
-    /**
-     * Parses a single row of the response and returns the key-value pair.
-     *
-     * @param string $row Single row of the response.
-     *
-     * @return array
-     */
-    protected function parseRow($row)
-    {
-        list($k, $v) = explode(':', $row, 2);
-
-        if (preg_match('/^db\d+$/', $k)) {
-            $v = $this->parseDatabaseStats($v);
-        }
-
-        return array($k, $v);
-    }
-
-    /**
-     * Extracts the statistics of each logical DB from the string buffer.
-     *
-     * @param string $str Response buffer.
-     *
-     * @return array
-     */
-    protected function parseDatabaseStats($str)
-    {
-        $db = array();
-
-        foreach (explode(',', $str) as $dbvar) {
-            list($dbvk, $dbvv) = explode('=', $dbvar);
-            $db[trim($dbvk)] = $dbvv;
-        }
-
-        return $db;
     }
 
     /**
@@ -602,6 +565,43 @@ class ServerInfo extends Command
         }
 
         return $stats;
+    }
+
+    /**
+     * Extracts the statistics of each logical DB from the string buffer.
+     *
+     * @param string $str Response buffer.
+     *
+     * @return array
+     */
+    protected function parseDatabaseStats($str)
+    {
+        $db = array();
+
+        foreach (explode(',', $str) as $dbvar) {
+            list($dbvk, $dbvv) = explode('=', $dbvar);
+            $db[mb_trim($dbvk)] = $dbvv;
+        }
+
+        return $db;
+    }
+
+    /**
+     * Parses a single row of the response and returns the key-value pair.
+     *
+     * @param string $row Single row of the response.
+     *
+     * @return array
+     */
+    protected function parseRow($row)
+    {
+        list($k, $v) = explode(':', $row, 2);
+
+        if (preg_match('/^db\d+$/', $k)) {
+            $v = $this->parseDatabaseStats($v);
+        }
+
+        return array($k, $v);
     }
 }
 
@@ -820,7 +820,7 @@ class ZSetRangeByScore extends ZSetRange
         $arguments = $this->getArguments();
 
         for ($i = 3; $i < count($arguments); $i++) {
-            switch (strtoupper($arguments[$i])) {
+            switch (mb_strtoupper($arguments[$i])) {
                 case 'WITHSCORES':
                     return true;
 
@@ -1279,7 +1279,7 @@ class ServerSentinel extends Command
      */
     public function parseResponse($data)
     {
-        switch (strtolower($this->getArgument(0))) {
+        switch (mb_strtolower($this->getArgument(0))) {
             case 'masters':
             case 'slaves':
                 return self::processMastersOrSlaves($data);
@@ -1330,6 +1330,25 @@ class ZSetScan extends Command
     /**
      * {@inheritdoc}
      */
+    public function parseResponse($data)
+    {
+        if (is_array($data)) {
+            $members = $data[1];
+            $result = array();
+
+            for ($i = 0; $i < count($members); $i++) {
+                $result[$members[$i]] = (float) $members[++$i];
+            }
+
+            $data[1] = $result;
+        }
+
+        return $data;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     protected function filterArguments(array $arguments)
     {
         if (count($arguments) === 3 && is_array($arguments[2])) {
@@ -1363,25 +1382,6 @@ class ZSetScan extends Command
         }
 
         return $normalized;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function parseResponse($data)
-    {
-        if (is_array($data)) {
-            $members = $data[1];
-            $result = array();
-
-            for ($i = 0; $i < count($members); $i++) {
-                $result[$members[$i]] = (float) $members[++$i];
-            }
-
-            $data[1] = $result;
-        }
-
-        return $data;
     }
 }
 
@@ -2252,17 +2252,17 @@ class HyperLogLogAdd extends Command
     /**
      * {@inheritdoc}
      */
-    protected function filterArguments(array $arguments)
+    public function parseResponse($data)
     {
-        return self::normalizeVariadic($arguments);
+        return (bool) $data;
     }
 
     /**
      * {@inheritdoc}
      */
-    public function parseResponse($data)
+    protected function filterArguments(array $arguments)
     {
-        return (bool) $data;
+        return self::normalizeVariadic($arguments);
     }
 }
 
@@ -2688,6 +2688,25 @@ class HashScan extends Command
     /**
      * {@inheritdoc}
      */
+    public function parseResponse($data)
+    {
+        if (is_array($data)) {
+            $fields = $data[1];
+            $result = array();
+
+            for ($i = 0; $i < count($fields); $i++) {
+                $result[$fields[$i]] = $fields[++$i];
+            }
+
+            $data[1] = $result;
+        }
+
+        return $data;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     protected function filterArguments(array $arguments)
     {
         if (count($arguments) === 3 && is_array($arguments[2])) {
@@ -2721,25 +2740,6 @@ class HashScan extends Command
         }
 
         return $normalized;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function parseResponse($data)
-    {
-        if (is_array($data)) {
-            $fields = $data[1];
-            $result = array();
-
-            for ($i = 0; $i < count($fields); $i++) {
-                $result[$fields[$i]] = $fields[++$i];
-            }
-
-            $data[1] = $result;
-        }
-
-        return $data;
     }
 }
 
@@ -2934,7 +2934,7 @@ class KeySort extends Command
 
         if (isset($sortParams['LIMIT']) &&
             is_array($sortParams['LIMIT']) &&
-            count($sortParams['LIMIT']) == 2) {
+            count($sortParams['LIMIT']) === 2) {
 
             $query[] = 'LIMIT';
             $query[] = $sortParams['LIMIT'][0];
@@ -2942,10 +2942,10 @@ class KeySort extends Command
         }
 
         if (isset($sortParams['SORT'])) {
-            $query[] = strtoupper($sortParams['SORT']);
+            $query[] = mb_strtoupper($sortParams['SORT']);
         }
 
-        if (isset($sortParams['ALPHA']) && $sortParams['ALPHA'] == true) {
+        if (isset($sortParams['ALPHA']) && $sortParams['ALPHA'] === true) {
             $query[] = 'ALPHA';
         }
 
@@ -2970,14 +2970,14 @@ class KeySort extends Command
  */
 class RawCommand implements CommandInterface
 {
-    private $slot;
-    private $commandID;
     private $arguments;
+    private $commandID;
+    private $slot;
 
     /**
      * @param array $arguments Command ID and its arguments.
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     public function __construct(array $arguments)
     {
@@ -2987,7 +2987,7 @@ class RawCommand implements CommandInterface
             );
         }
 
-        $this->commandID = strtoupper(array_shift($arguments));
+        $this->commandID = mb_strtoupper(array_shift($arguments));
         $this->arguments = $arguments;
     }
 
@@ -3010,9 +3010,45 @@ class RawCommand implements CommandInterface
     /**
      * {@inheritdoc}
      */
+    public function getArgument($index)
+    {
+        if (isset($this->arguments[$index])) {
+            return $this->arguments[$index];
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getArguments()
+    {
+        return $this->arguments;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function getId()
     {
         return $this->commandID;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getSlot()
+    {
+        if (isset($this->slot)) {
+            return $this->slot;
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function parseResponse($data)
+    {
+        return $data;
     }
 
     /**
@@ -3035,45 +3071,9 @@ class RawCommand implements CommandInterface
     /**
      * {@inheritdoc}
      */
-    public function getArguments()
-    {
-        return $this->arguments;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getArgument($index)
-    {
-        if (isset($this->arguments[$index])) {
-            return $this->arguments[$index];
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
     public function setSlot($slot)
     {
         $this->slot = $slot;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getSlot()
-    {
-        if (isset($this->slot)) {
-            return $this->slot;
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function parseResponse($data)
-    {
-        return $data;
     }
 }
 
@@ -3094,17 +3094,14 @@ abstract class ScriptCommand extends ServerEvalSHA
     abstract public function getScript();
 
     /**
-     * Specifies the number of arguments that should be considered as keys.
-     *
-     * The default behaviour for the base class is to return 0 to indicate that
-     * all the elements of the arguments array should be considered as keys, but
-     * subclasses can enforce a static number of keys.
-     *
-     * @return int
+     * @return array
      */
-    protected function getKeysCount()
+    final public function getEvalArguments()
     {
-        return 0;
+        $arguments = $this->getArguments();
+        $arguments[0] = $this->getScript();
+
+        return $arguments;
     }
 
     /**
@@ -3112,7 +3109,7 @@ abstract class ScriptCommand extends ServerEvalSHA
      *
      * @return array
      */
-    public function getKeys()
+    final public function getKeys()
     {
         return array_slice($this->getArguments(), 2, $this->getKeysCount());
     }
@@ -3130,14 +3127,17 @@ abstract class ScriptCommand extends ServerEvalSHA
     }
 
     /**
-     * @return array
+     * Specifies the number of arguments that should be considered as keys.
+     *
+     * The default behaviour for the base class is to return 0 to indicate that
+     * all the elements of the arguments array should be considered as keys, but
+     * subclasses can enforce a static number of keys.
+     *
+     * @return int
      */
-    public function getEvalArguments()
+    protected function getKeysCount()
     {
-        $arguments = $this->getArguments();
-        $arguments[0] = $this->getScript();
-
-        return $arguments;
+        return 0;
     }
 }
 
@@ -3160,7 +3160,7 @@ class ServerBackgroundRewriteAOF extends Command
      */
     public function parseResponse($data)
     {
-        return $data == 'Background append only file rewriting started';
+        return $data === 'Background append only file rewriting started';
     }
 }
 
@@ -3228,7 +3228,7 @@ class PubSubPubsub extends Command
      */
     public function parseResponse($data)
     {
-        switch (strtolower($this->getArgument(0))) {
+        switch (mb_strtolower($this->getArgument(0))) {
             case 'numsub':
                 return self::processNumsub($data);
 
@@ -3304,7 +3304,7 @@ class ServerClient extends Command
     {
         $args = array_change_key_case($this->getArguments(), CASE_UPPER);
 
-        switch (strtoupper($args[0])) {
+        switch (mb_strtoupper($args[0])) {
             case 'LIST':
                 return $this->parseClientList($data);
             case 'KILL':
@@ -3801,6 +3801,15 @@ interface ConnectionInterface
     public function disconnect();
 
     /**
+     * Writes a request for the given command over the connection and reads back
+     * the response returned by Redis.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     */
+    public function executeCommand(CommandInterface $command);
+
+    /**
      * Checks if the connection to Redis is considered open.
      *
      * @return bool
@@ -3808,30 +3817,19 @@ interface ConnectionInterface
     public function isConnected();
 
     /**
+     * Reads the response to the given command from the connection.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     */
+    public function readResponse(CommandInterface $command);
+
+    /**
      * Writes the request for the given command over the connection.
      *
      * @param CommandInterface $command Command instance.
      */
     public function writeRequest(CommandInterface $command);
-
-    /**
-     * Reads the response to the given command from the connection.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return mixed
-     */
-    public function readResponse(CommandInterface $command);
-
-    /**
-     * Writes a request for the given command over the connection and reads back
-     * the response returned by Redis.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return mixed
-     */
-    public function executeCommand(CommandInterface $command);
 }
 
 /**
@@ -3849,11 +3847,12 @@ interface NodeConnectionInterface extends ConnectionInterface
     public function __toString();
 
     /**
-     * Returns the underlying resource used to communicate with Redis.
+     * Pushes the given command into a queue of commands executed when
+     * establishing the actual connection to Redis.
      *
-     * @return mixed
+     * @param CommandInterface $command Instance of a Redis command.
      */
-    public function getResource();
+    public function addConnectCommand(CommandInterface $command);
 
     /**
      * Returns the parameters used to initialize the connection.
@@ -3863,17 +3862,14 @@ interface NodeConnectionInterface extends ConnectionInterface
     public function getParameters();
 
     /**
-     * Pushes the given command into a queue of commands executed when
-     * establishing the actual connection to Redis.
+     * Returns the underlying resource used to communicate with Redis.
      *
-     * @param CommandInterface $command Instance of a Redis command.
      */
-    public function addConnectCommand(CommandInterface $command);
+    public function getResource();
 
     /**
      * Reads a response from the server.
      *
-     * @return mixed
      */
     public function read();
 }
@@ -3894,15 +3890,6 @@ interface AggregateConnectionInterface extends ConnectionInterface
     public function add(NodeConnectionInterface $connection);
 
     /**
-     * Removes the specified connection instance from the aggregate connection.
-     *
-     * @param NodeConnectionInterface $connection Connection instance.
-     *
-     * @return bool Returns true if the connection was in the pool.
-     */
-    public function remove(NodeConnectionInterface $connection);
-
-    /**
      * Returns the connection instance in charge for the given command.
      *
      * @param CommandInterface $command Command instance.
@@ -3919,6 +3906,15 @@ interface AggregateConnectionInterface extends ConnectionInterface
      * @return NodeConnectionInterface|null
      */
     public function getConnectionById($connectionID);
+
+    /**
+     * Removes the specified connection instance from the aggregate connection.
+     *
+     * @param NodeConnectionInterface $connection Connection instance.
+     *
+     * @return bool Returns true if the connection was in the pool.
+     */
+    public function remove(NodeConnectionInterface $connection);
 }
 
 /**
@@ -3929,11 +3925,11 @@ interface AggregateConnectionInterface extends ConnectionInterface
  */
 abstract class AbstractConnection implements NodeConnectionInterface
 {
-    private $resource;
-    private $cachedId;
+    protected $initCommands = array();
 
     protected $parameters;
-    protected $initCommands = array();
+    private $cachedId;
+    private $resource;
 
     /**
      * @param ParametersInterface $parameters Initialization parameters for the connection.
@@ -3953,13 +3949,117 @@ abstract class AbstractConnection implements NodeConnectionInterface
     }
 
     /**
+     * {@inheritdoc}
+     */
+    public function __sleep()
+    {
+        return array('parameters', 'initCommands');
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function __toString()
+    {
+        if (!isset($this->cachedId)) {
+            $this->cachedId = $this->getIdentifier();
+        }
+
+        return $this->cachedId;
+    }
+
+    /**
+     * Creates the underlying resource used to communicate with Redis.
+     *
+     */
+    abstract protected function createResource();
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function addConnectCommand(CommandInterface $command)
+    {
+        $this->initCommands[] = $command;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function connect()
+    {
+        if (!$this->isConnected()) {
+            $this->resource = $this->createResource();
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function disconnect()
+    {
+        unset($this->resource);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function executeCommand(CommandInterface $command)
+    {
+        $this->writeRequest($command);
+
+        return $this->readResponse($command);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function getParameters()
+    {
+        return $this->parameters;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function getResource()
+    {
+        if (isset($this->resource)) {
+            return $this->resource;
+        }
+
+        $this->connect();
+
+        return $this->resource;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function isConnected()
+    {
+        return isset($this->resource);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function readResponse(CommandInterface $command)
+    {
+        return $this->read();
+    }
+
+    /**
      * Checks some of the parameters used to initialize the connection.
      *
      * @param ParametersInterface $parameters Initialization parameters for the connection.
      *
      * @return ParametersInterface
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     protected function assertParameters(ParametersInterface $parameters)
     {
@@ -3977,66 +4077,17 @@ abstract class AbstractConnection implements NodeConnectionInterface
     }
 
     /**
-     * Creates the underlying resource used to communicate with Redis.
+     * Gets an identifier for the connection.
      *
-     * @return mixed
+     * @return string
      */
-    abstract protected function createResource();
-
-    /**
-     * {@inheritdoc}
-     */
-    public function isConnected()
+    protected function getIdentifier()
     {
-        return isset($this->resource);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function connect()
-    {
-        if (!$this->isConnected()) {
-            $this->resource = $this->createResource();
-
-            return true;
+        if ($this->parameters->scheme === 'unix') {
+            return $this->parameters->path;
         }
 
-        return false;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function disconnect()
-    {
-        unset($this->resource);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function addConnectCommand(CommandInterface $command)
-    {
-        $this->initCommands[] = $command;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function executeCommand(CommandInterface $command)
-    {
-        $this->writeRequest($command);
-
-        return $this->readResponse($command);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function readResponse(CommandInterface $command)
-    {
-        return $this->read();
+        return "{$this->parameters->host}:{$this->parameters->port}";
     }
 
     /**
@@ -4069,62 +4120,6 @@ abstract class AbstractConnection implements NodeConnectionInterface
                 "$message [{$this->parameters->scheme}://{$this->getIdentifier()}]"
             )
         );
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getResource()
-    {
-        if (isset($this->resource)) {
-            return $this->resource;
-        }
-
-        $this->connect();
-
-        return $this->resource;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getParameters()
-    {
-        return $this->parameters;
-    }
-
-    /**
-     * Gets an identifier for the connection.
-     *
-     * @return string
-     */
-    protected function getIdentifier()
-    {
-        if ($this->parameters->scheme === 'unix') {
-            return $this->parameters->path;
-        }
-
-        return "{$this->parameters->host}:{$this->parameters->port}";
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __toString()
-    {
-        if (!isset($this->cachedId)) {
-            $this->cachedId = $this->getIdentifier();
-        }
-
-        return $this->cachedId;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __sleep()
-    {
-        return array('parameters', 'initCommands');
     }
 }
 
@@ -4163,93 +4158,6 @@ class StreamConnection extends AbstractConnection
     /**
      * {@inheritdoc}
      */
-    protected function createResource()
-    {
-        $initializer = "{$this->parameters->scheme}StreamInitializer";
-        $resource = $this->$initializer($this->parameters);
-
-        return $resource;
-    }
-
-    /**
-     * Initializes a TCP stream resource.
-     *
-     * @param ParametersInterface $parameters Initialization parameters for the connection.
-     *
-     * @return resource
-     */
-    protected function tcpStreamInitializer(ParametersInterface $parameters)
-    {
-        $uri = "tcp://{$parameters->host}:{$parameters->port}";
-        $flags = STREAM_CLIENT_CONNECT;
-
-        if (isset($parameters->async_connect) && (bool) $parameters->async_connect) {
-            $flags |= STREAM_CLIENT_ASYNC_CONNECT;
-        }
-
-        if (isset($parameters->persistent) && (bool) $parameters->persistent) {
-            $flags |= STREAM_CLIENT_PERSISTENT;
-            $uri .= strpos($path = $parameters->path, '/') === 0 ? $path : "/$path";
-        }
-
-        $resource = @stream_socket_client($uri, $errno, $errstr, (float) $parameters->timeout, $flags);
-
-        if (!$resource) {
-            $this->onConnectionError(trim($errstr), $errno);
-        }
-
-        if (isset($parameters->read_write_timeout)) {
-            $rwtimeout = (float) $parameters->read_write_timeout;
-            $rwtimeout = $rwtimeout > 0 ? $rwtimeout : -1;
-            $timeoutSeconds  = floor($rwtimeout);
-            $timeoutUSeconds = ($rwtimeout - $timeoutSeconds) * 1000000;
-            stream_set_timeout($resource, $timeoutSeconds, $timeoutUSeconds);
-        }
-
-        if (isset($parameters->tcp_nodelay) && function_exists('socket_import_stream')) {
-            $socket = socket_import_stream($resource);
-            socket_set_option($socket, SOL_TCP, TCP_NODELAY, (int) $parameters->tcp_nodelay);
-        }
-
-        return $resource;
-    }
-
-    /**
-     * Initializes a UNIX stream resource.
-     *
-     * @param ParametersInterface $parameters Initialization parameters for the connection.
-     *
-     * @return resource
-     */
-    protected function unixStreamInitializer(ParametersInterface $parameters)
-    {
-        $uri = "unix://{$parameters->path}";
-        $flags = STREAM_CLIENT_CONNECT;
-
-        if ((bool) $parameters->persistent) {
-            $flags |= STREAM_CLIENT_PERSISTENT;
-        }
-
-        $resource = @stream_socket_client($uri, $errno, $errstr, (float) $parameters->timeout, $flags);
-
-        if (!$resource) {
-            $this->onConnectionError(trim($errstr), $errno);
-        }
-
-        if (isset($parameters->read_write_timeout)) {
-            $rwtimeout = (float) $parameters->read_write_timeout;
-            $rwtimeout = $rwtimeout > 0 ? $rwtimeout : -1;
-            $timeoutSeconds  = floor($rwtimeout);
-            $timeoutUSeconds = ($rwtimeout - $timeoutSeconds) * 1000000;
-            stream_set_timeout($resource, $timeoutSeconds, $timeoutUSeconds);
-        }
-
-        return $resource;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
     public function connect()
     {
         if (parent::connect() && $this->initCommands) {
@@ -4271,31 +4179,6 @@ class StreamConnection extends AbstractConnection
     }
 
     /**
-     * Performs a write operation over the stream of the buffer containing a
-     * command serialized with the Redis wire protocol.
-     *
-     * @param string $buffer Representation of a command in the Redis wire protocol.
-     */
-    protected function write($buffer)
-    {
-        $socket = $this->getResource();
-
-        while (($length = strlen($buffer)) > 0) {
-            $written = @fwrite($socket, $buffer);
-
-            if ($length === $written) {
-                return;
-            }
-
-            if ($written === false || $written === 0) {
-                $this->onConnectionError('Error while writing bytes to the server.');
-            }
-
-            $buffer = substr($buffer, $written);
-        }
-    }
-
-    /**
      * {@inheritdoc}
      */
     public function read()
@@ -4308,7 +4191,7 @@ class StreamConnection extends AbstractConnection
         }
 
         $prefix = $chunk[0];
-        $payload = substr($chunk, 1, -2);
+        $payload = mb_substr($chunk, 1, -2);
 
         switch ($prefix) {
             case '+':
@@ -4332,10 +4215,10 @@ class StreamConnection extends AbstractConnection
                     }
 
                     $bulkData .= $chunk;
-                    $bytesLeft = $size - strlen($bulkData);
+                    $bytesLeft = $size - mb_strlen($bulkData);
                 } while ($bytesLeft > 0);
 
-                return substr($bulkData, 0, -2);
+                return mb_substr($bulkData, 0, -2);
 
             case '*':
                 $count = (int) $payload;
@@ -4373,18 +4256,130 @@ class StreamConnection extends AbstractConnection
         $commandID = $command->getId();
         $arguments = $command->getArguments();
 
-        $cmdlen = strlen($commandID);
+        $cmdlen = mb_strlen($commandID);
         $reqlen = count($arguments) + 1;
 
         $buffer = "*{$reqlen}\r\n\${$cmdlen}\r\n{$commandID}\r\n";
 
         for ($i = 0, $reqlen--; $i < $reqlen; $i++) {
             $argument = $arguments[$i];
-            $arglen = strlen($argument);
+            $arglen = mb_strlen($argument);
             $buffer .= "\${$arglen}\r\n{$argument}\r\n";
         }
 
         $this->write($buffer);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function createResource()
+    {
+        $initializer = "{$this->parameters->scheme}StreamInitializer";
+        $resource = $this->$initializer($this->parameters);
+
+        return $resource;
+    }
+
+    /**
+     * Initializes a TCP stream resource.
+     *
+     * @param ParametersInterface $parameters Initialization parameters for the connection.
+     *
+     * @return resource
+     */
+    protected function tcpStreamInitializer(ParametersInterface $parameters)
+    {
+        $uri = "tcp://{$parameters->host}:{$parameters->port}";
+        $flags = STREAM_CLIENT_CONNECT;
+
+        if (isset($parameters->async_connect) && (bool) $parameters->async_connect) {
+            $flags |= STREAM_CLIENT_ASYNC_CONNECT;
+        }
+
+        if (isset($parameters->persistent) && (bool) $parameters->persistent) {
+            $flags |= STREAM_CLIENT_PERSISTENT;
+            $uri .= mb_strpos($path = $parameters->path, '/') === 0 ? $path : "/$path";
+        }
+
+        $resource = @stream_socket_client($uri, $errno, $errstr, (float) $parameters->timeout, $flags);
+
+        if (!$resource) {
+            $this->onConnectionError(mb_trim($errstr), $errno);
+        }
+
+        if (isset($parameters->read_write_timeout)) {
+            $rwtimeout = (float) $parameters->read_write_timeout;
+            $rwtimeout = $rwtimeout > 0 ? $rwtimeout : -1;
+            $timeoutSeconds  = floor($rwtimeout);
+            $timeoutUSeconds = ($rwtimeout - $timeoutSeconds) * 1000000;
+            stream_set_timeout($resource, $timeoutSeconds, $timeoutUSeconds);
+        }
+
+        if (isset($parameters->tcp_nodelay) && function_exists('socket_import_stream')) {
+            $socket = socket_import_stream($resource);
+            socket_set_option($socket, SOL_TCP, TCP_NODELAY, (int) $parameters->tcp_nodelay);
+        }
+
+        return $resource;
+    }
+
+    /**
+     * Initializes a UNIX stream resource.
+     *
+     * @param ParametersInterface $parameters Initialization parameters for the connection.
+     *
+     * @return resource
+     */
+    protected function unixStreamInitializer(ParametersInterface $parameters)
+    {
+        $uri = "unix://{$parameters->path}";
+        $flags = STREAM_CLIENT_CONNECT;
+
+        if ((bool) $parameters->persistent) {
+            $flags |= STREAM_CLIENT_PERSISTENT;
+        }
+
+        $resource = @stream_socket_client($uri, $errno, $errstr, (float) $parameters->timeout, $flags);
+
+        if (!$resource) {
+            $this->onConnectionError(mb_trim($errstr), $errno);
+        }
+
+        if (isset($parameters->read_write_timeout)) {
+            $rwtimeout = (float) $parameters->read_write_timeout;
+            $rwtimeout = $rwtimeout > 0 ? $rwtimeout : -1;
+            $timeoutSeconds  = floor($rwtimeout);
+            $timeoutUSeconds = ($rwtimeout - $timeoutSeconds) * 1000000;
+            stream_set_timeout($resource, $timeoutSeconds, $timeoutUSeconds);
+        }
+
+        return $resource;
+    }
+
+    /**
+     * Performs a write operation over the stream of the buffer containing a
+     * command serialized with the Redis wire protocol.
+     *
+     * @param string $buffer Representation of a command in the Redis wire protocol.
+     */
+    protected function write($buffer)
+    {
+        $socket = $this->getResource();
+
+        while (($length = mb_strlen($buffer)) > 0) {
+            $written = @fwrite($socket, $buffer);
+
+            if ($length === $written) {
+                return;
+            }
+
+            if ($written === false || $written === 0) {
+                $this->onConnectionError('Error while writing bytes to the server.');
+            }
+
+            $buffer = mb_substr($buffer, $written);
+        }
     }
 }
 
@@ -4413,15 +4408,6 @@ class StreamConnection extends AbstractConnection
 interface ParametersInterface
 {
     /**
-     * Checks if the specified parameters is set.
-     *
-     * @param string $parameter Name of the parameter.
-     *
-     * @return bool
-     */
-    public function __isset($parameter);
-
-    /**
      * Returns the value of the specified parameter.
      *
      * @param string $parameter Name of the parameter.
@@ -4429,6 +4415,14 @@ interface ParametersInterface
      * @return mixed|null
      */
     public function __get($parameter);
+    /**
+     * Checks if the specified parameters is set.
+     *
+     * @param string $parameter Name of the parameter.
+     *
+     * @return bool
+     */
+    public function __isset($parameter);
 
     /**
      * Returns an array representation of the connection parameters.
@@ -4446,6 +4440,22 @@ interface ParametersInterface
 interface FactoryInterface
 {
     /**
+     * Aggregates single connections into an aggregate connection instance.
+     *
+     * @param AggregateConnectionInterface $aggregate  Aggregate connection instance.
+     * @param array                        $parameters List of parameters for each connection.
+     */
+    public function aggregate(AggregateConnectionInterface $aggregate, array $parameters);
+
+    /**
+     * Creates a new connection object.
+     *
+     * @param mixed $parameters Initialization parameters for the connection.
+     *
+     * @return NodeConnectionInterface
+     */
+    public function create($parameters);
+    /**
      * Defines or overrides the connection class identified by a scheme prefix.
      *
      * @param string $scheme      Target connection scheme.
@@ -4459,23 +4469,6 @@ interface FactoryInterface
      * @param string $scheme Target connection scheme.
      */
     public function undefine($scheme);
-
-    /**
-     * Creates a new connection object.
-     *
-     * @param mixed $parameters Initialization parameters for the connection.
-     *
-     * @return NodeConnectionInterface
-     */
-    public function create($parameters);
-
-    /**
-     * Aggregates single connections into an aggregate connection instance.
-     *
-     * @param AggregateConnectionInterface $aggregate  Aggregate connection instance.
-     * @param array                        $parameters List of parameters for each connection.
-     */
-    public function aggregate(AggregateConnectionInterface $aggregate, array $parameters);
 }
 
 /**
@@ -4492,13 +4485,6 @@ interface CompositeConnectionInterface extends NodeConnectionInterface
     public function getProtocol();
 
     /**
-     * Writes the buffer containing over the connection.
-     *
-     * @param string $buffer String buffer to be sent over the connection.
-     */
-    public function writeBuffer($buffer);
-
-    /**
      * Reads the given number of bytes from the connection.
      *
      * @param int $length Number of bytes to read from the connection.
@@ -4513,6 +4499,13 @@ interface CompositeConnectionInterface extends NodeConnectionInterface
      * @param string
      */
     public function readLine();
+
+    /**
+     * Writes the buffer containing over the connection.
+     *
+     * @param string $buffer String buffer to be sent over the connection.
+     */
+    public function writeBuffer($buffer);
 }
 
 /**
@@ -4571,76 +4564,62 @@ class PhpiredisStreamConnection extends StreamConnection
     }
 
     /**
-     * Checks if the phpiredis extension is loaded in PHP.
+     * {@inheritdoc}
      */
-    private function assertExtensions()
+    public function __wakeup()
     {
-        if (!extension_loaded('phpiredis')) {
-            throw new NotSupportedException(
-                'The "phpiredis" extension is required by this connection backend.'
-            );
-        }
+        $this->assertExtensions();
+        $this->reader = $this->createReader();
     }
 
     /**
      * {@inheritdoc}
      */
-    protected function tcpStreamInitializer(ParametersInterface $parameters)
+    public function read()
     {
-        $uri = "tcp://{$parameters->host}:{$parameters->port}";
-        $flags = STREAM_CLIENT_CONNECT;
-        $socket = null;
+        $socket = $this->getResource();
+        $reader = $this->reader;
 
-        if (isset($parameters->async_connect) && (bool) $parameters->async_connect) {
-            $flags |= STREAM_CLIENT_ASYNC_CONNECT;
+        while (PHPIREDIS_READER_STATE_INCOMPLETE === $state = phpiredis_reader_get_state($reader)) {
+            $buffer = stream_socket_recvfrom($socket, 4096);
+
+            if ($buffer === false || $buffer === '') {
+                $this->onConnectionError('Error while reading bytes from the server.');
+            }
+
+            phpiredis_reader_feed($reader, $buffer);
         }
 
-        if (isset($parameters->persistent) && (bool) $parameters->persistent) {
-            $flags |= STREAM_CLIENT_PERSISTENT;
-            $uri .= strpos($path = $parameters->path, '/') === 0 ? $path : "/$path";
+        if ($state === PHPIREDIS_READER_STATE_COMPLETE) {
+            return phpiredis_reader_get_reply($reader);
         }
+        $this->onProtocolError(phpiredis_reader_get_error($reader));
 
-        $resource = @stream_socket_client($uri, $errno, $errstr, (float) $parameters->timeout, $flags);
+        return;
 
-        if (!$resource) {
-            $this->onConnectionError(trim($errstr), $errno);
-        }
-
-        if (isset($parameters->read_write_timeout) && function_exists('socket_import_stream')) {
-            $rwtimeout = (float) $parameters->read_write_timeout;
-            $rwtimeout = $rwtimeout > 0 ? $rwtimeout : -1;
-
-            $timeout = array(
-                'sec'  => $timeoutSeconds = floor($rwtimeout),
-                'usec' => ($rwtimeout - $timeoutSeconds) * 1000000,
-            );
-
-            $socket = $socket ?: socket_import_stream($resource);
-            @socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, $timeout);
-            @socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, $timeout);
-        }
-
-        if (isset($parameters->tcp_nodelay) && function_exists('socket_import_stream')) {
-            $socket = $socket ?: socket_import_stream($resource);
-            socket_set_option($socket, SOL_TCP, TCP_NODELAY, (int) $parameters->tcp_nodelay);
-        }
-
-        return $resource;
     }
 
     /**
-     * Creates a new instance of the protocol reader resource.
-     *
-     * @return resource
+     * {@inheritdoc}
      */
-    private function createReader()
+    public function writeRequest(CommandInterface $command)
     {
-        $reader = phpiredis_reader_create();
+        $arguments = $command->getArguments();
+        array_unshift($arguments, $command->getId());
 
-        phpiredis_reader_set_status_handler($reader, $this->getStatusHandler());
-        phpiredis_reader_set_error_handler($reader, $this->getErrorHandler());
+        $this->write(phpiredis_format_command($arguments));
+    }
 
-        return $reader;
+    /**
+     * Returns the handler used by the protocol reader for error responses.
+     *
+     * @return \Closure
+     */
+    protected function getErrorHandler()
+    {
+        return function ($errorMessage) {
+            return new ErrorResponse($errorMessage);
+        };
     }
 
     /**
@@ -4666,62 +4645,76 @@ class PhpiredisStreamConnection extends StreamConnection
     }
 
     /**
-     * Returns the handler used by the protocol reader for error responses.
+     * {@inheritdoc}
+     */
+    protected function tcpStreamInitializer(ParametersInterface $parameters)
+    {
+        $uri = "tcp://{$parameters->host}:{$parameters->port}";
+        $flags = STREAM_CLIENT_CONNECT;
+        $socket = null;
+
+        if (isset($parameters->async_connect) && (bool) $parameters->async_connect) {
+            $flags |= STREAM_CLIENT_ASYNC_CONNECT;
+        }
+
+        if (isset($parameters->persistent) && (bool) $parameters->persistent) {
+            $flags |= STREAM_CLIENT_PERSISTENT;
+            $uri .= mb_strpos($path = $parameters->path, '/') === 0 ? $path : "/$path";
+        }
+
+        $resource = @stream_socket_client($uri, $errno, $errstr, (float) $parameters->timeout, $flags);
+
+        if (!$resource) {
+            $this->onConnectionError(mb_trim($errstr), $errno);
+        }
+
+        if (isset($parameters->read_write_timeout) && function_exists('socket_import_stream')) {
+            $rwtimeout = (float) $parameters->read_write_timeout;
+            $rwtimeout = $rwtimeout > 0 ? $rwtimeout : -1;
+
+            $timeout = array(
+                'sec'  => $timeoutSeconds = floor($rwtimeout),
+                'usec' => ($rwtimeout - $timeoutSeconds) * 1000000,
+            );
+
+            $socket = $socket ?: socket_import_stream($resource);
+            @socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, $timeout);
+            @socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, $timeout);
+        }
+
+        if (isset($parameters->tcp_nodelay) && function_exists('socket_import_stream')) {
+            $socket = $socket ?: socket_import_stream($resource);
+            socket_set_option($socket, SOL_TCP, TCP_NODELAY, (int) $parameters->tcp_nodelay);
+        }
+
+        return $resource;
+    }
+
+    /**
+     * Checks if the phpiredis extension is loaded in PHP.
+     */
+    private function assertExtensions()
+    {
+        if (!extension_loaded('phpiredis')) {
+            throw new NotSupportedException(
+                'The "phpiredis" extension is required by this connection backend.'
+            );
+        }
+    }
+
+    /**
+     * Creates a new instance of the protocol reader resource.
      *
-     * @return \Closure
+     * @return resource
      */
-    protected function getErrorHandler()
+    private function createReader()
     {
-        return function ($errorMessage) {
-            return new ErrorResponse($errorMessage);
-        };
-    }
+        $reader = phpiredis_reader_create();
 
-    /**
-     * {@inheritdoc}
-     */
-    public function read()
-    {
-        $socket = $this->getResource();
-        $reader = $this->reader;
+        phpiredis_reader_set_status_handler($reader, $this->getStatusHandler());
+        phpiredis_reader_set_error_handler($reader, $this->getErrorHandler());
 
-        while (PHPIREDIS_READER_STATE_INCOMPLETE === $state = phpiredis_reader_get_state($reader)) {
-            $buffer = stream_socket_recvfrom($socket, 4096);
-
-            if ($buffer === false || $buffer === '') {
-                $this->onConnectionError('Error while reading bytes from the server.');
-            }
-
-            phpiredis_reader_feed($reader, $buffer);
-        }
-
-        if ($state === PHPIREDIS_READER_STATE_COMPLETE) {
-            return phpiredis_reader_get_reply($reader);
-        } else {
-            $this->onProtocolError(phpiredis_reader_get_error($reader));
-
-            return;
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function writeRequest(CommandInterface $command)
-    {
-        $arguments = $command->getArguments();
-        array_unshift($arguments, $command->getId());
-
-        $this->write(phpiredis_format_command($arguments));
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __wakeup()
-    {
-        $this->assertExtensions();
-        $this->reader = $this->createReader();
+        return $reader;
     }
 }
 
@@ -4753,13 +4746,13 @@ class PhpiredisStreamConnection extends StreamConnection
 class WebdisConnection implements NodeConnectionInterface
 {
     private $parameters;
-    private $resource;
     private $reader;
+    private $resource;
 
     /**
      * @param ParametersInterface $parameters Initialization parameters for the connection.
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     public function __construct(ParametersInterface $parameters)
     {
@@ -4786,16 +4779,199 @@ class WebdisConnection implements NodeConnectionInterface
     }
 
     /**
-     * Helper method used to throw on unsupported methods.
+     * {@inheritdoc}
+     */
+    public function __sleep()
+    {
+        return array('parameters');
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function __toString()
+    {
+        return "{$this->parameters->host}:{$this->parameters->port}";
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function __wakeup()
+    {
+        $this->assertExtensions();
+
+        $this->resource = $this->createCurl();
+        $this->reader = $this->createReader();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function addConnectCommand(CommandInterface $command)
+    {
+        $this->throwNotSupportedException(__FUNCTION__);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function connect()
+    {
+        // NOOP
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function disconnect()
+    {
+        // NOOP
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function executeCommand(CommandInterface $command)
+    {
+        $resource = $this->resource;
+        $commandId = $this->getCommandId($command);
+
+        if ($arguments = $command->getArguments()) {
+            $arguments = implode('/', array_map('urlencode', $arguments));
+            $serializedCommand = "$commandId/$arguments.raw";
+        } else {
+            $serializedCommand = "$commandId.raw";
+        }
+
+        curl_setopt($resource, CURLOPT_POSTFIELDS, $serializedCommand);
+
+        if (curl_exec($resource) === false) {
+            $error = curl_error($resource);
+            $errno = curl_errno($resource);
+
+            throw new ConnectionException($this, mb_trim($error), $errno);
+        }
+
+        if (phpiredis_reader_get_state($this->reader) !== PHPIREDIS_READER_STATE_COMPLETE) {
+            throw new ProtocolException($this, phpiredis_reader_get_error($this->reader));
+        }
+
+        return phpiredis_reader_get_reply($this->reader);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getParameters()
+    {
+        return $this->parameters;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getResource()
+    {
+        return $this->resource;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function isConnected()
+    {
+        return true;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function read()
+    {
+        $this->throwNotSupportedException(__FUNCTION__);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function readResponse(CommandInterface $command)
+    {
+        $this->throwNotSupportedException(__FUNCTION__);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function writeRequest(CommandInterface $command)
+    {
+        $this->throwNotSupportedException(__FUNCTION__);
+    }
+
+    /**
+     * Feeds the phpredis reader resource with the data read from the network.
      *
-     * @param string $method Name of the unsupported method.
+     * @param resource $resource Reader resource.
+     * @param string   $buffer   Buffer of data read from a connection.
+     *
+     * @return int
+     */
+    protected function feedReader($resource, $buffer)
+    {
+        phpiredis_reader_feed($this->reader, $buffer);
+
+        return mb_strlen($buffer);
+    }
+
+    /**
+     * Checks if the specified command is supported by this connection class.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     * @return string
      *
      * @throws NotSupportedException
      */
-    private function throwNotSupportedException($method)
+    protected function getCommandId(CommandInterface $command)
     {
-        $class = __CLASS__;
-        throw new NotSupportedException("The method $class::$method() is not supported.");
+        switch ($commandID = $command->getId()) {
+            case 'AUTH':
+            case 'SELECT':
+            case 'MULTI':
+            case 'EXEC':
+            case 'WATCH':
+            case 'UNWATCH':
+            case 'DISCARD':
+            case 'MONITOR':
+                throw new NotSupportedException("Command '$commandID' is not allowed by Webdis.");
+
+            default:
+                return $commandID;
+        }
+    }
+
+    /**
+     * Returns the handler used by the protocol reader for error responses.
+     *
+     * @return \Closure
+     */
+    protected function getErrorHandler()
+    {
+        return function ($payload) {
+            return new ErrorResponse($payload);
+        };
+    }
+
+    /**
+     * Returns the handler used by the protocol reader for inline responses.
+     *
+     * @return \Closure
+     */
+    protected function getStatusHandler()
+    {
+        return function ($payload) {
+            return StatusResponse::get($payload);
+        };
     }
 
     /**
@@ -4859,199 +5035,16 @@ class WebdisConnection implements NodeConnectionInterface
     }
 
     /**
-     * Returns the handler used by the protocol reader for inline responses.
+     * Helper method used to throw on unsupported methods.
      *
-     * @return \Closure
-     */
-    protected function getStatusHandler()
-    {
-        return function ($payload) {
-            return StatusResponse::get($payload);
-        };
-    }
-
-    /**
-     * Returns the handler used by the protocol reader for error responses.
-     *
-     * @return \Closure
-     */
-    protected function getErrorHandler()
-    {
-        return function ($payload) {
-            return new ErrorResponse($payload);
-        };
-    }
-
-    /**
-     * Feeds the phpredis reader resource with the data read from the network.
-     *
-     * @param resource $resource Reader resource.
-     * @param string   $buffer   Buffer of data read from a connection.
-     *
-     * @return int
-     */
-    protected function feedReader($resource, $buffer)
-    {
-        phpiredis_reader_feed($this->reader, $buffer);
-
-        return strlen($buffer);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function connect()
-    {
-        // NOOP
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function disconnect()
-    {
-        // NOOP
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function isConnected()
-    {
-        return true;
-    }
-
-    /**
-     * Checks if the specified command is supported by this connection class.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return string
+     * @param string $method Name of the unsupported method.
      *
      * @throws NotSupportedException
      */
-    protected function getCommandId(CommandInterface $command)
+    private function throwNotSupportedException($method)
     {
-        switch ($commandID = $command->getId()) {
-            case 'AUTH':
-            case 'SELECT':
-            case 'MULTI':
-            case 'EXEC':
-            case 'WATCH':
-            case 'UNWATCH':
-            case 'DISCARD':
-            case 'MONITOR':
-                throw new NotSupportedException("Command '$commandID' is not allowed by Webdis.");
-
-            default:
-                return $commandID;
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function writeRequest(CommandInterface $command)
-    {
-        $this->throwNotSupportedException(__FUNCTION__);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function readResponse(CommandInterface $command)
-    {
-        $this->throwNotSupportedException(__FUNCTION__);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function executeCommand(CommandInterface $command)
-    {
-        $resource = $this->resource;
-        $commandId = $this->getCommandId($command);
-
-        if ($arguments = $command->getArguments()) {
-            $arguments = implode('/', array_map('urlencode', $arguments));
-            $serializedCommand = "$commandId/$arguments.raw";
-        } else {
-            $serializedCommand = "$commandId.raw";
-        }
-
-        curl_setopt($resource, CURLOPT_POSTFIELDS, $serializedCommand);
-
-        if (curl_exec($resource) === false) {
-            $error = curl_error($resource);
-            $errno = curl_errno($resource);
-
-            throw new ConnectionException($this, trim($error), $errno);
-        }
-
-        if (phpiredis_reader_get_state($this->reader) !== PHPIREDIS_READER_STATE_COMPLETE) {
-            throw new ProtocolException($this, phpiredis_reader_get_error($this->reader));
-        }
-
-        return phpiredis_reader_get_reply($this->reader);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getResource()
-    {
-        return $this->resource;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getParameters()
-    {
-        return $this->parameters;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function addConnectCommand(CommandInterface $command)
-    {
-        $this->throwNotSupportedException(__FUNCTION__);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function read()
-    {
-        $this->throwNotSupportedException(__FUNCTION__);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __toString()
-    {
-        return "{$this->parameters->host}:{$this->parameters->port}";
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __sleep()
-    {
-        return array('parameters');
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __wakeup()
-    {
-        $this->assertExtensions();
-
-        $this->resource = $this->createCurl();
-        $this->reader = $this->createReader();
+        $class = __CLASS__;
+        throw new NotSupportedException("The method $class::$method() is not supported.");
     }
 }
 
@@ -5109,6 +5102,104 @@ class PhpiredisSocketConnection extends AbstractConnection
     }
 
     /**
+     * {@inheritdoc}
+     */
+    public function __wakeup()
+    {
+        $this->assertExtensions();
+        $this->reader = $this->createReader();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function connect()
+    {
+        if (parent::connect()) {
+            $this->connectWithTimeout($this->parameters);
+
+            if ($this->initCommands) {
+                foreach ($this->initCommands as $command) {
+                    $this->executeCommand($command);
+                }
+            }
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function disconnect()
+    {
+        if ($this->isConnected()) {
+            socket_close($this->getResource());
+            parent::disconnect();
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function read()
+    {
+        $socket = $this->getResource();
+        $reader = $this->reader;
+
+        while (PHPIREDIS_READER_STATE_INCOMPLETE === $state = phpiredis_reader_get_state($reader)) {
+            if (@socket_recv($socket, $buffer, 4096, 0) === false || $buffer === '') {
+                $this->emitSocketError();
+            }
+
+            phpiredis_reader_feed($reader, $buffer);
+        }
+
+        if ($state === PHPIREDIS_READER_STATE_COMPLETE) {
+            return phpiredis_reader_get_reply($reader);
+        }
+        $this->onProtocolError(phpiredis_reader_get_error($reader));
+
+        return;
+
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function writeRequest(CommandInterface $command)
+    {
+        $arguments = $command->getArguments();
+        array_unshift($arguments, $command->getId());
+
+        $this->write(phpiredis_format_command($arguments));
+    }
+
+    /**
+     * Gets the address from the connection parameters.
+     *
+     * @param ParametersInterface $parameters Parameters used to initialize the connection.
+     *
+     * @return string
+     */
+    protected static function getAddress(ParametersInterface $parameters)
+    {
+        if ($parameters->scheme === 'unix') {
+            return $parameters->path;
+        }
+
+        $host = $parameters->host;
+
+        if (ip2long($host) === false) {
+            if (false === $addresses = gethostbynamel($host)) {
+                return false;
+            }
+
+            return $addresses[array_rand($addresses)];
+        }
+
+        return $host;
+    }
+
+    /**
      * Checks if the socket and phpiredis extensions are loaded in PHP.
      */
     protected function assertExtensions()
@@ -5141,68 +5232,6 @@ class PhpiredisSocketConnection extends AbstractConnection
     }
 
     /**
-     * Creates a new instance of the protocol reader resource.
-     *
-     * @return resource
-     */
-    private function createReader()
-    {
-        $reader = phpiredis_reader_create();
-
-        phpiredis_reader_set_status_handler($reader, $this->getStatusHandler());
-        phpiredis_reader_set_error_handler($reader, $this->getErrorHandler());
-
-        return $reader;
-    }
-
-    /**
-     * Returns the underlying protocol reader resource.
-     *
-     * @return resource
-     */
-    protected function getReader()
-    {
-        return $this->reader;
-    }
-
-    /**
-     * Returns the handler used by the protocol reader for inline responses.
-     *
-     * @return \Closure
-     */
-    private function getStatusHandler()
-    {
-        return function ($payload) {
-            return StatusResponse::get($payload);
-        };
-    }
-
-    /**
-     * Returns the handler used by the protocol reader for error responses.
-     *
-     * @return \Closure
-     */
-    protected function getErrorHandler()
-    {
-        return function ($payload) {
-            return new ErrorResponse($payload);
-        };
-    }
-
-    /**
-     * Helper method used to throw exceptions on socket errors.
-     */
-    private function emitSocketError()
-    {
-        $errno = socket_last_error();
-        $errstr = socket_strerror($errno);
-
-        $this->disconnect();
-
-        $this->onConnectionError(trim($errstr), $errno);
-    }
-
-    /**
      * {@inheritdoc}
      */
     protected function createResource()
@@ -5220,6 +5249,137 @@ class PhpiredisSocketConnection extends AbstractConnection
         $this->setSocketOptions($socket, $this->parameters);
 
         return $socket;
+    }
+
+    /**
+     * Returns the handler used by the protocol reader for error responses.
+     *
+     * @return \Closure
+     */
+    protected function getErrorHandler()
+    {
+        return function ($payload) {
+            return new ErrorResponse($payload);
+        };
+    }
+
+    /**
+     * Returns the underlying protocol reader resource.
+     *
+     * @return resource
+     */
+    protected function getReader()
+    {
+        return $this->reader;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function write($buffer)
+    {
+        $socket = $this->getResource();
+
+        while (($length = mb_strlen($buffer)) > 0) {
+            $written = socket_write($socket, $buffer, $length);
+
+            if ($length === $written) {
+                return;
+            }
+
+            if ($written === false) {
+                $this->onConnectionError('Error while writing bytes to the server.');
+            }
+
+            $buffer = mb_substr($buffer, $written);
+        }
+    }
+
+    /**
+     * Opens the actual connection to the server with a timeout.
+     *
+     * @param ParametersInterface $parameters Parameters used to initialize the connection.
+     *
+     * @return string
+     */
+    private function connectWithTimeout(ParametersInterface $parameters)
+    {
+        if (false === $host = self::getAddress($parameters)) {
+            $this->onConnectionError("Cannot resolve the address of '$parameters->host'.");
+        }
+
+        $socket = $this->getResource();
+
+        socket_set_nonblock($socket);
+
+        if (@socket_connect($socket, $host, (int) $parameters->port) === false) {
+            $error = socket_last_error();
+
+            if ($error !== SOCKET_EINPROGRESS && $error !== SOCKET_EALREADY) {
+                $this->emitSocketError();
+            }
+        }
+
+        socket_set_block($socket);
+
+        $null = null;
+        $selectable = array($socket);
+
+        $timeout = (float) $parameters->timeout;
+        $timeoutSecs = floor($timeout);
+        $timeoutUSecs = ($timeout - $timeoutSecs) * 1000000;
+
+        $selected = socket_select($selectable, $selectable, $null, $timeoutSecs, $timeoutUSecs);
+
+        if ($selected === 2) {
+            $this->onConnectionError('Connection refused.', SOCKET_ECONNREFUSED);
+        }
+        if ($selected === 0) {
+            $this->onConnectionError('Connection timed out.', SOCKET_ETIMEDOUT);
+        }
+        if ($selected === false) {
+            $this->emitSocketError();
+        }
+    }
+
+    /**
+     * Creates a new instance of the protocol reader resource.
+     *
+     * @return resource
+     */
+    private function createReader()
+    {
+        $reader = phpiredis_reader_create();
+
+        phpiredis_reader_set_status_handler($reader, $this->getStatusHandler());
+        phpiredis_reader_set_error_handler($reader, $this->getErrorHandler());
+
+        return $reader;
+    }
+
+    /**
+     * Helper method used to throw exceptions on socket errors.
+     */
+    private function emitSocketError()
+    {
+        $errno = socket_last_error();
+        $errstr = socket_strerror($errno);
+
+        $this->disconnect();
+
+        $this->onConnectionError(mb_trim($errstr), $errno);
+    }
+
+    /**
+     * Returns the handler used by the protocol reader for inline responses.
+     *
+     * @return \Closure
+     */
+    private function getStatusHandler()
+    {
+        return function ($payload) {
+            return StatusResponse::get($payload);
+        };
     }
 
     /**
@@ -5261,173 +5421,6 @@ class PhpiredisSocketConnection extends AbstractConnection
             }
         }
     }
-
-    /**
-     * Gets the address from the connection parameters.
-     *
-     * @param ParametersInterface $parameters Parameters used to initialize the connection.
-     *
-     * @return string
-     */
-    protected static function getAddress(ParametersInterface $parameters)
-    {
-        if ($parameters->scheme === 'unix') {
-            return $parameters->path;
-        }
-
-        $host = $parameters->host;
-
-        if (ip2long($host) === false) {
-            if (false === $addresses = gethostbynamel($host)) {
-                return false;
-            }
-
-            return $addresses[array_rand($addresses)];
-        }
-
-        return $host;
-    }
-
-    /**
-     * Opens the actual connection to the server with a timeout.
-     *
-     * @param ParametersInterface $parameters Parameters used to initialize the connection.
-     *
-     * @return string
-     */
-    private function connectWithTimeout(ParametersInterface $parameters)
-    {
-        if (false === $host = self::getAddress($parameters)) {
-            $this->onConnectionError("Cannot resolve the address of '$parameters->host'.");
-        }
-
-        $socket = $this->getResource();
-
-        socket_set_nonblock($socket);
-
-        if (@socket_connect($socket, $host, (int) $parameters->port) === false) {
-            $error = socket_last_error();
-
-            if ($error != SOCKET_EINPROGRESS && $error != SOCKET_EALREADY) {
-                $this->emitSocketError();
-            }
-        }
-
-        socket_set_block($socket);
-
-        $null = null;
-        $selectable = array($socket);
-
-        $timeout = (float) $parameters->timeout;
-        $timeoutSecs = floor($timeout);
-        $timeoutUSecs = ($timeout - $timeoutSecs) * 1000000;
-
-        $selected = socket_select($selectable, $selectable, $null, $timeoutSecs, $timeoutUSecs);
-
-        if ($selected === 2) {
-            $this->onConnectionError('Connection refused.', SOCKET_ECONNREFUSED);
-        }
-        if ($selected === 0) {
-            $this->onConnectionError('Connection timed out.', SOCKET_ETIMEDOUT);
-        }
-        if ($selected === false) {
-            $this->emitSocketError();
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function connect()
-    {
-        if (parent::connect()) {
-            $this->connectWithTimeout($this->parameters);
-
-            if ($this->initCommands) {
-                foreach ($this->initCommands as $command) {
-                    $this->executeCommand($command);
-                }
-            }
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function disconnect()
-    {
-        if ($this->isConnected()) {
-            socket_close($this->getResource());
-            parent::disconnect();
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function write($buffer)
-    {
-        $socket = $this->getResource();
-
-        while (($length = strlen($buffer)) > 0) {
-            $written = socket_write($socket, $buffer, $length);
-
-            if ($length === $written) {
-                return;
-            }
-
-            if ($written === false) {
-                $this->onConnectionError('Error while writing bytes to the server.');
-            }
-
-            $buffer = substr($buffer, $written);
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function read()
-    {
-        $socket = $this->getResource();
-        $reader = $this->reader;
-
-        while (PHPIREDIS_READER_STATE_INCOMPLETE === $state = phpiredis_reader_get_state($reader)) {
-            if (@socket_recv($socket, $buffer, 4096, 0) === false || $buffer === '') {
-                $this->emitSocketError();
-            }
-
-            phpiredis_reader_feed($reader, $buffer);
-        }
-
-        if ($state === PHPIREDIS_READER_STATE_COMPLETE) {
-            return phpiredis_reader_get_reply($reader);
-        } else {
-            $this->onProtocolError(phpiredis_reader_get_error($reader));
-
-            return;
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function writeRequest(CommandInterface $command)
-    {
-        $arguments = $command->getArguments();
-        array_unshift($arguments, $command->getId());
-
-        $this->write(phpiredis_format_command($arguments));
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __wakeup()
-    {
-        $this->assertExtensions();
-        $this->reader = $this->createReader();
-    }
 }
 
 /**
@@ -5455,6 +5448,14 @@ class CompositeStreamConnection extends StreamConnection implements CompositeCon
     /**
      * {@inheritdoc}
      */
+    public function __sleep()
+    {
+        return array_merge(parent::__sleep(), array('protocol'));
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function getProtocol()
     {
         return $this->protocol;
@@ -5463,9 +5464,9 @@ class CompositeStreamConnection extends StreamConnection implements CompositeCon
     /**
      * {@inheritdoc}
      */
-    public function writeBuffer($buffer)
+    public function read()
     {
-        $this->write($buffer);
+        return $this->protocol->read($this);
     }
 
     /**
@@ -5488,7 +5489,7 @@ class CompositeStreamConnection extends StreamConnection implements CompositeCon
             }
 
             $value .= $chunk;
-        } while (($length -= strlen($chunk)) > 0);
+        } while (($length -= mb_strlen($chunk)) > 0);
 
         return $value;
     }
@@ -5509,9 +5510,17 @@ class CompositeStreamConnection extends StreamConnection implements CompositeCon
             }
 
             $value .= $chunk;
-        } while (substr($value, -2) !== "\r\n");
+        } while (mb_substr($value, -2) !== "\r\n");
 
-        return substr($value, 0, -2);
+        return mb_substr($value, 0, -2);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function writeBuffer($buffer)
+    {
+        $this->write($buffer);
     }
 
     /**
@@ -5520,22 +5529,6 @@ class CompositeStreamConnection extends StreamConnection implements CompositeCon
     public function writeRequest(CommandInterface $command)
     {
         $this->protocol->write($this, $command);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function read()
-    {
-        return $this->protocol->read($this);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __sleep()
-    {
-        return array_merge(parent::__sleep(), array('protocol'));
     }
 }
 
@@ -5557,14 +5550,13 @@ class ConnectionException extends CommunicationException
  */
 class Parameters implements ParametersInterface
 {
-    private $parameters;
-
     private static $defaults = array(
         'scheme' => 'tcp',
         'host' => '127.0.0.1',
         'port' => 6379,
         'timeout' => 5.0,
     );
+    private $parameters;
 
     /**
      * @param array $parameters Named array of connection parameters.
@@ -5575,13 +5567,29 @@ class Parameters implements ParametersInterface
     }
 
     /**
-     * Returns some default parameters with their values.
-     *
-     * @return array
+     * {@inheritdoc}
      */
-    protected function getDefaults()
+    public function __get($parameter)
     {
-        return self::$defaults;
+        if (isset($this->parameters[$parameter])) {
+            return $this->parameters[$parameter];
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function __isset($parameter)
+    {
+        return isset($this->parameters[$parameter]);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function __sleep()
+    {
+        return array('parameters');
     }
 
     /**
@@ -5608,11 +5616,11 @@ class Parameters implements ParametersInterface
      *
      * @return array
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     public static function parse($uri)
     {
-        if (stripos($uri, 'unix') === 0) {
+        if (mb_stripos($uri, 'unix') === 0) {
             // Hack to support URIs for UNIX sockets with minimal effort.
             $uri = str_ireplace('unix:///', 'unix://localhost/', $uri);
         }
@@ -5632,6 +5640,14 @@ class Parameters implements ParametersInterface
     }
 
     /**
+     * {@inheritdoc}
+     */
+    public function toArray()
+    {
+        return $this->parameters;
+    }
+
+    /**
      * Validates and converts each value of the connection parameters array.
      *
      * @param array $parameters Connection parameters.
@@ -5644,37 +5660,13 @@ class Parameters implements ParametersInterface
     }
 
     /**
-     * {@inheritdoc}
+     * Returns some default parameters with their values.
+     *
+     * @return array
      */
-    public function __get($parameter)
+    protected function getDefaults()
     {
-        if (isset($this->parameters[$parameter])) {
-            return $this->parameters[$parameter];
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __isset($parameter)
-    {
-        return isset($this->parameters[$parameter]);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function toArray()
-    {
-        return $this->parameters;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __sleep()
-    {
-        return array('parameters');
+        return self::$defaults;
     }
 }
 
@@ -5692,47 +5684,13 @@ class Factory implements FactoryInterface
     );
 
     /**
-     * Checks if the provided argument represents a valid connection class
-     * implementing Predis\Connection\NodeConnectionInterface. Optionally,
-     * callable objects are used for lazy initialization of connection objects.
-     *
-     * @param mixed $initializer FQN of a connection class or a callable for lazy initialization.
-     *
-     * @return mixed
-     *
-     * @throws \InvalidArgumentException
-     */
-    protected function checkInitializer($initializer)
-    {
-        if (is_callable($initializer)) {
-            return $initializer;
-        }
-
-        $class = new ReflectionClass($initializer);
-
-        if (!$class->isSubclassOf('Predis\Connection\NodeConnectionInterface')) {
-            throw new InvalidArgumentException(
-                'A connection initializer must be a valid connection class or a callable object.'
-            );
-        }
-
-        return $initializer;
-    }
-
-    /**
      * {@inheritdoc}
      */
-    public function define($scheme, $initializer)
+    public function aggregate(AggregateConnectionInterface $connection, array $parameters)
     {
-        $this->schemes[$scheme] = $this->checkInitializer($initializer);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function undefine($scheme)
-    {
-        unset($this->schemes[$scheme]);
+        foreach ($parameters as $node) {
+            $connection->add($node instanceof NodeConnectionInterface ? $node : $this->create($node));
+        }
     }
 
     /**
@@ -5772,11 +5730,44 @@ class Factory implements FactoryInterface
     /**
      * {@inheritdoc}
      */
-    public function aggregate(AggregateConnectionInterface $connection, array $parameters)
+    public function define($scheme, $initializer)
     {
-        foreach ($parameters as $node) {
-            $connection->add($node instanceof NodeConnectionInterface ? $node : $this->create($node));
+        $this->schemes[$scheme] = $this->checkInitializer($initializer);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function undefine($scheme)
+    {
+        unset($this->schemes[$scheme]);
+    }
+
+    /**
+     * Checks if the provided argument represents a valid connection class
+     * implementing Predis\Connection\NodeConnectionInterface. Optionally,
+     * callable objects are used for lazy initialization of connection objects.
+     *
+     * @param mixed $initializer FQN of a connection class or a callable for lazy initialization.
+     *
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function checkInitializer($initializer)
+    {
+        if (is_callable($initializer)) {
+            return $initializer;
         }
+
+        $class = new ReflectionClass($initializer);
+
+        if (!$class->isSubclassOf('Predis\Connection\NodeConnectionInterface')) {
+            throw new InvalidArgumentException(
+                'A connection initializer must be a valid connection class or a callable object.'
+            );
+        }
+
+        return $initializer;
     }
 
     /**
@@ -5834,6 +5825,15 @@ use Predis\Command\Processor\ProcessorInterface;
 interface ProfileInterface
 {
     /**
+     * Creates a new command instance.
+     *
+     * @param string $commandID Command ID.
+     * @param array  $arguments Arguments for the command.
+     *
+     * @return CommandInterface
+     */
+    public function createCommand($commandID, array $arguments = array());
+    /**
      * Returns the profile version corresponding to the Redis version.
      *
      * @return string
@@ -5857,16 +5857,6 @@ interface ProfileInterface
      * @return string
      */
     public function supportsCommands(array $commandIDs);
-
-    /**
-     * Creates a new command instance.
-     *
-     * @param string $commandID Command ID.
-     * @param array  $arguments Arguments for the command.
-     *
-     * @return CommandInterface
-     */
-    public function createCommand($commandID, array $arguments = array());
 }
 
 /**
@@ -5888,6 +5878,16 @@ abstract class RedisProfile implements ProfileInterface
     }
 
     /**
+     * Returns the version of server profile as its string representation.
+     *
+     * @return string
+     */
+    public function __toString()
+    {
+        return $this->getVersion();
+    }
+
+    /**
      * Returns a map of all the commands supported by the profile and their
      * actual PHP classes.
      *
@@ -5898,46 +5898,9 @@ abstract class RedisProfile implements ProfileInterface
     /**
      * {@inheritdoc}
      */
-    public function supportsCommand($commandID)
+    final public function createCommand($commandID, array $arguments = array())
     {
-        return isset($this->commands[strtoupper($commandID)]);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function supportsCommands(array $commandIDs)
-    {
-        foreach ($commandIDs as $commandID) {
-            if (!$this->supportsCommand($commandID)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Returns the fully-qualified name of a class representing the specified
-     * command ID registered in the current server profile.
-     *
-     * @param string $commandID Command ID.
-     *
-     * @return string|null
-     */
-    public function getCommandClass($commandID)
-    {
-        if (isset($this->commands[$commandID = strtoupper($commandID)])) {
-            return $this->commands[$commandID];
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function createCommand($commandID, array $arguments = array())
-    {
-        $commandID = strtoupper($commandID);
+        $commandID = mb_strtoupper($commandID);
 
         if (!isset($this->commands[$commandID])) {
             throw new ClientException("Command '$commandID' is not a registered Redis command.");
@@ -5960,9 +5923,9 @@ abstract class RedisProfile implements ProfileInterface
      * @param string $commandID Command ID.
      * @param string $class     Fully-qualified name of a Predis\Command\CommandInterface.
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
-    public function defineCommand($commandID, $class)
+    final public function defineCommand($commandID, $class)
     {
         $reflection = new ReflectionClass($class);
 
@@ -5970,13 +5933,36 @@ abstract class RedisProfile implements ProfileInterface
             throw new InvalidArgumentException("The class '$class' is not a valid command class.");
         }
 
-        $this->commands[strtoupper($commandID)] = $class;
+        $this->commands[mb_strtoupper($commandID)] = $class;
+    }
+
+    /**
+     * Returns the fully-qualified name of a class representing the specified
+     * command ID registered in the current server profile.
+     *
+     * @param string $commandID Command ID.
+     *
+     * @return string|null
+     */
+    final public function getCommandClass($commandID)
+    {
+        if (isset($this->commands[$commandID = mb_strtoupper($commandID)])) {
+            return $this->commands[$commandID];
+        }
     }
 
     /**
      * {@inheritdoc}
      */
-    public function setProcessor(ProcessorInterface $processor = null)
+    final public function getProcessor()
+    {
+        return $this->processor;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function setProcessor(ProcessorInterface $processor = null)
     {
         $this->processor = $processor;
     }
@@ -5984,19 +5970,23 @@ abstract class RedisProfile implements ProfileInterface
     /**
      * {@inheritdoc}
      */
-    public function getProcessor()
+    final public function supportsCommand($commandID)
     {
-        return $this->processor;
+        return isset($this->commands[mb_strtoupper($commandID)]);
     }
 
     /**
-     * Returns the version of server profile as its string representation.
-     *
-     * @return string
+     * {@inheritdoc}
      */
-    public function __toString()
+    final public function supportsCommands(array $commandIDs)
     {
-        return $this->getVersion();
+        foreach ($commandIDs as $commandID) {
+            if (!$this->supportsCommand($commandID)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 
@@ -6007,14 +5997,6 @@ abstract class RedisProfile implements ProfileInterface
  */
 class RedisVersion300 extends RedisProfile
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function getVersion()
-    {
-        return '3.0';
-    }
-
     /**
      * {@inheritdoc}
      */
@@ -6254,6 +6236,13 @@ class RedisVersion300 extends RedisProfile
 
         );
     }
+    /**
+     * {@inheritdoc}
+     */
+    public function getVersion()
+    {
+        return '3.0';
+    }
 }
 
 /**
@@ -6263,14 +6252,6 @@ class RedisVersion300 extends RedisProfile
  */
 class RedisVersion260 extends RedisProfile
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function getVersion()
-    {
-        return '2.6';
-    }
-
     /**
      * {@inheritdoc}
      */
@@ -6476,6 +6457,13 @@ class RedisVersion260 extends RedisProfile
             'SENTINEL'                  => 'Predis\Command\ServerSentinel',
         );
     }
+    /**
+     * {@inheritdoc}
+     */
+    public function getVersion()
+    {
+        return '2.6';
+    }
 }
 
 /**
@@ -6485,14 +6473,6 @@ class RedisVersion260 extends RedisProfile
  */
 class RedisVersion280 extends RedisProfile
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function getVersion()
-    {
-        return '2.8';
-    }
-
     /**
      * {@inheritdoc}
      */
@@ -6729,6 +6709,13 @@ class RedisVersion280 extends RedisProfile
             'COMMAND'                   => 'Predis\Command\ServerCommand',
         );
     }
+    /**
+     * {@inheritdoc}
+     */
+    public function getVersion()
+    {
+        return '2.8';
+    }
 }
 
 /**
@@ -6738,14 +6725,6 @@ class RedisVersion280 extends RedisProfile
  */
 class RedisVersion240 extends RedisProfile
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function getVersion()
-    {
-        return '2.4';
-    }
-
     /**
      * {@inheritdoc}
      */
@@ -6924,6 +6903,13 @@ class RedisVersion240 extends RedisProfile
             'CLIENT'                    => 'Predis\Command\ServerClient',
         );
     }
+    /**
+     * {@inheritdoc}
+     */
+    public function getVersion()
+    {
+        return '2.4';
+    }
 }
 
 /**
@@ -6933,14 +6919,6 @@ class RedisVersion240 extends RedisProfile
  */
 class RedisVersion200 extends RedisProfile
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function getVersion()
-    {
-        return '2.0';
-    }
-
     /**
      * {@inheritdoc}
      */
@@ -7085,6 +7063,13 @@ class RedisVersion200 extends RedisProfile
             'CONFIG'                    => 'Predis\Command\ServerConfig',
         );
     }
+    /**
+     * {@inheritdoc}
+     */
+    public function getVersion()
+    {
+        return '2.0';
+    }
 }
 
 /**
@@ -7097,17 +7082,16 @@ class RedisUnstable extends RedisVersion300
     /**
      * {@inheritdoc}
      */
-    public function getVersion()
-    {
-        return '3.0';
-    }
-
-    /**
-     * {@inheritdoc}
-     */
     public function getSupportedCommands()
     {
         return array_merge(parent::getSupportedCommands(), array());
+    }
+    /**
+     * {@inheritdoc}
+     */
+    public function getVersion()
+    {
+        return '3.0';
     }
 }
 
@@ -7138,32 +7122,12 @@ final class Factory
     }
 
     /**
-     * Returns the default server profile.
-     *
-     * @return ProfileInterface
-     */
-    public static function getDefault()
-    {
-        return self::get('default');
-    }
-
-    /**
-     * Returns the development server profile.
-     *
-     * @return ProfileInterface
-     */
-    public static function getDevelopment()
-    {
-        return self::get('dev');
-    }
-
-    /**
      * Registers a new server profile.
      *
      * @param string $alias Profile version or alias.
      * @param string $class FQN of a class implementing Predis\Profile\ProfileInterface.
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     public static function define($alias, $class)
     {
@@ -7195,6 +7159,26 @@ final class Factory
 
         return new $profile();
     }
+
+    /**
+     * Returns the default server profile.
+     *
+     * @return ProfileInterface
+     */
+    public static function getDefault()
+    {
+        return self::get('default');
+    }
+
+    /**
+     * Returns the development server profile.
+     *
+     * @return ProfileInterface
+     */
+    public static function getDevelopment()
+    {
+        return self::get('dev');
+    }
 }
 
 /**
@@ -7204,14 +7188,6 @@ final class Factory
  */
 class RedisVersion220 extends RedisProfile
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function getVersion()
-    {
-        return '2.2';
-    }
-
     /**
      * {@inheritdoc}
      */
@@ -7384,6 +7360,13 @@ class RedisVersion220 extends RedisProfile
             'OBJECT'                    => 'Predis\Command\ServerObject',
             'SLOWLOG'                   => 'Predis\Command\ServerSlowlog',
         );
+    }
+    /**
+     * {@inheritdoc}
+     */
+    public function getVersion()
+    {
+        return '2.2';
     }
 }
 
@@ -7568,21 +7551,11 @@ abstract class PredisException extends Exception
 interface ClientContextInterface
 {
     /**
-     * Sends the specified command instance to Redis.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return mixed
-     */
-    public function executeCommand(CommandInterface $command);
-
-    /**
      * Sends the specified command with its arguments to Redis.
      *
      * @param string $method    Command ID.
      * @param array  $arguments Arguments for the command.
      *
-     * @return mixed
      */
     public function __call($method, $arguments);
 
@@ -7594,6 +7567,13 @@ interface ClientContextInterface
      * @return array
      */
     public function execute($callable = null);
+    /**
+     * Sends the specified command instance to Redis.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     */
+    public function executeCommand(CommandInterface $command);
 }
 
 /**
@@ -7622,33 +7602,13 @@ abstract class CommunicationException extends PredisException
     }
 
     /**
-     * Gets the connection that generated the exception.
-     *
-     * @return NodeConnectionInterface
-     */
-    public function getConnection()
-    {
-        return $this->connection;
-    }
-
-    /**
-     * Indicates if the receiver should reset the underlying connection.
-     *
-     * @return bool
-     */
-    public function shouldResetConnection()
-    {
-        return true;
-    }
-
-    /**
      * Helper method to handle exceptions generated by a connection object.
      *
      * @param CommunicationException $exception Exception.
      *
      * @throws CommunicationException
      */
-    public static function handle(CommunicationException $exception)
+    final public static function handle(self $exception)
     {
         if ($exception->shouldResetConnection()) {
             $connection = $exception->getConnection();
@@ -7659,6 +7619,26 @@ abstract class CommunicationException extends PredisException
         }
 
         throw $exception;
+    }
+
+    /**
+     * Gets the connection that generated the exception.
+     *
+     * @return NodeConnectionInterface
+     */
+    final public function getConnection()
+    {
+        return $this->connection;
+    }
+
+    /**
+     * Indicates if the receiver should reset the underlying connection.
+     *
+     * @return bool
+     */
+    final public function shouldResetConnection()
+    {
+        return true;
     }
 }
 
@@ -7814,35 +7794,19 @@ abstract class CommunicationException extends PredisException
 interface ClientInterface
 {
     /**
-     * Returns the server profile used by the client.
+     * Creates a Redis command with the specified arguments and sends a request
+     * to the server.
      *
-     * @return ProfileInterface
-     */
-    public function getProfile();
-
-    /**
-     * Returns the client options specified upon initialization.
+     * @param string $method    Command ID.
+     * @param array  $arguments Arguments for the command.
      *
-     * @return OptionsInterface
      */
-    public function getOptions();
+    public function __call($method, $arguments);
 
     /**
      * Opens the underlying connection to the server.
      */
     public function connect();
-
-    /**
-     * Closes the underlying connection from the server.
-     */
-    public function disconnect();
-
-    /**
-     * Returns the underlying connection instance.
-     *
-     * @return ConnectionInterface
-     */
-    public function getConnection();
 
     /**
      * Creates a new instance of the specified Redis command.
@@ -7855,24 +7819,37 @@ interface ClientInterface
     public function createCommand($method, $arguments = array());
 
     /**
+     * Closes the underlying connection from the server.
+     */
+    public function disconnect();
+
+    /**
      * Executes the specified Redis command.
      *
      * @param CommandInterface $command Command instance.
      *
-     * @return mixed
      */
     public function executeCommand(CommandInterface $command);
 
     /**
-     * Creates a Redis command with the specified arguments and sends a request
-     * to the server.
+     * Returns the underlying connection instance.
      *
-     * @param string $method    Command ID.
-     * @param array  $arguments Arguments for the command.
-     *
-     * @return mixed
+     * @return ConnectionInterface
      */
-    public function __call($method, $arguments);
+    public function getConnection();
+
+    /**
+     * Returns the client options specified upon initialization.
+     *
+     * @return OptionsInterface
+     */
+    public function getOptions();
+    /**
+     * Returns the server profile used by the client.
+     *
+     * @return ProfileInterface
+     */
+    public function getProfile();
 }
 
 /**
@@ -7925,27 +7902,220 @@ class Client implements ClientInterface
     }
 
     /**
-     * Creates a new instance of Predis\Configuration\Options from different
-     * types of arguments or simply returns the passed argument if it is an
-     * instance of Predis\Configuration\OptionsInterface.
-     *
-     * @param mixed $options Client options.
-     *
-     * @return OptionsInterface
-     *
-     * @throws \InvalidArgumentException
+     * {@inheritdoc}
      */
-    protected function createOptions($options)
+    public function __call($commandID, $arguments)
     {
-        if (is_array($options)) {
-            return new Options($options);
+        return $this->executeCommand(
+            $this->createCommand($commandID, $arguments)
+        );
+    }
+
+    /**
+     * Opens the underlying connection and connects to the server.
+     */
+    public function connect()
+    {
+        $this->connection->connect();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function createCommand($commandID, $arguments = array())
+    {
+        return $this->profile->createCommand($commandID, $arguments);
+    }
+
+    /**
+     * Closes the underlying connection and disconnects from the server.
+     */
+    public function disconnect()
+    {
+        $this->connection->disconnect();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function executeCommand(CommandInterface $command)
+    {
+        $response = $this->connection->executeCommand($command);
+
+        if ($response instanceof ResponseInterface) {
+            if ($response instanceof ErrorResponseInterface) {
+                $response = $this->onErrorResponse($command, $response);
+            }
+
+            return $response;
         }
 
-        if ($options instanceof OptionsInterface) {
-            return $options;
+        return $command->parseResponse($response);
+    }
+
+    /**
+     * Executes a command without filtering its arguments, parsing the response,
+     * applying any prefix to keys or throwing exceptions on Redis errors even
+     * regardless of client options.
+     *
+     * It is possibile to indentify Redis error responses from normal responses
+     * using the second optional argument which is populated by reference.
+     *
+     * @param array $arguments Command arguments as defined by the command signature.
+     * @param bool  $error     Set to TRUE when Redis returned an error response.
+     *
+     */
+    public function executeRaw(array $arguments, &$error = null)
+    {
+        $error = false;
+        $response = $this->connection->executeCommand(
+            new RawCommand($arguments)
+        );
+
+        if ($response instanceof ResponseInterface) {
+            if ($response instanceof ErrorResponseInterface) {
+                $error = true;
+            }
+
+            return (string) $response;
         }
 
-        throw new InvalidArgumentException("Invalid type for client options.");
+        return $response;
+    }
+
+    /**
+     * Creates a new client instance for the specified connection ID or alias,
+     * only when working with an aggregate connection (cluster, replication).
+     * The new client instances uses the same options of the original one.
+     *
+     * @param string $connectionID Identifier of a connection.
+     *
+     * @return Client
+     *
+     * @throws InvalidArgumentException
+     */
+    public function getClientFor($connectionID)
+    {
+        if (!$connection = $this->getConnectionById($connectionID)) {
+            throw new InvalidArgumentException("Invalid connection ID: $connectionID.");
+        }
+
+        return new static($connection, $this->options);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getConnection()
+    {
+        return $this->connection;
+    }
+
+    /**
+     * Retrieves the specified connection from the aggregate connection when the
+     * client is in cluster or replication mode.
+     *
+     * @param string $connectionID Index or alias of the single connection.
+     *
+     * @return NodeConnectionInterface
+     *
+     * @throws NotSupportedException
+     */
+    public function getConnectionById($connectionID)
+    {
+        if (!$this->connection instanceof AggregateConnectionInterface) {
+            throw new NotSupportedException(
+                'Retrieving connections by ID is supported only by aggregate connections.'
+            );
+        }
+
+        return $this->connection->getConnectionById($connectionID);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getOptions()
+    {
+        return $this->options;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getProfile()
+    {
+        return $this->profile;
+    }
+
+    /**
+     * Returns the current state of the underlying connection.
+     *
+     * @return bool
+     */
+    public function isConnected()
+    {
+        return $this->connection->isConnected();
+    }
+
+    /**
+     * Creates a new monitor consumer and returns it.
+     *
+     * @return MonitorConsumer
+     */
+    public function monitor()
+    {
+        return new MonitorConsumer($this);
+    }
+
+    /**
+     * Creates a new pipeline context and returns it, or returns the results of
+     * a pipeline executed inside the optionally provided callable object.
+     *
+     * @param mixed ... Array of options, a callable for execution, or both.
+     *
+     * @return Pipeline|array
+     */
+    public function pipeline(/* arguments */)
+    {
+        return $this->sharedContextFactory('createPipeline', func_get_args());
+    }
+
+    /**
+     * Creates a new publis/subscribe context and returns it, or starts its loop
+     * inside the optionally provided callable object.
+     *
+     * @param mixed ... Array of options, a callable for execution, or both.
+     *
+     * @return PubSubConsumer|null
+     */
+    public function pubSubLoop(/* arguments */)
+    {
+        return $this->sharedContextFactory('createPubSub', func_get_args());
+    }
+
+    /**
+     * Closes the underlying connection and disconnects from the server.
+     *
+     * This is the same as `Client::disconnect()` as it does not actually send
+     * the `QUIT` command to Redis, but simply closes the connection.
+     */
+    public function quit()
+    {
+        $this->disconnect();
+    }
+
+    /**
+     * Creates a new transaction context and returns it, or returns the results
+     * of a transaction executed inside the optionally provided callable object.
+     *
+     * @param mixed ... Array of options, a callable for execution, or both.
+     *
+     * @return MultiExecTransaction|array
+     */
+    public function transaction(/* arguments */)
+    {
+        return $this->sharedContextFactory('createTransaction', func_get_args());
     }
 
     /**
@@ -7965,7 +8135,7 @@ class Client implements ClientInterface
      *
      * @return ConnectionInterface
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     protected function createConnection($parameters)
     {
@@ -8011,10 +8181,105 @@ class Client implements ClientInterface
     }
 
     /**
+     * Creates a new instance of Predis\Configuration\Options from different
+     * types of arguments or simply returns the passed argument if it is an
+     * instance of Predis\Configuration\OptionsInterface.
+     *
+     * @param mixed $options Client options.
+     *
+     * @return OptionsInterface
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function createOptions($options)
+    {
+        if (is_array($options)) {
+            return new Options($options);
+        }
+
+        if ($options instanceof OptionsInterface) {
+            return $options;
+        }
+
+        throw new InvalidArgumentException("Invalid type for client options.");
+    }
+
+    /**
+     * Actual pipeline context initializer method.
+     *
+     * @param array $options  Options for the context.
+     * @param mixed $callable Optional callable used to execute the context.
+     *
+     * @return Pipeline|array
+     */
+    protected function createPipeline(array $options = null, $callable = null)
+    {
+        if (isset($options['atomic']) && $options['atomic']) {
+            $class = 'Predis\Pipeline\Atomic';
+        } elseif (isset($options['fire-and-forget']) && $options['fire-and-forget']) {
+            $class = 'Predis\Pipeline\FireAndForget';
+        } else {
+            $class = 'Predis\Pipeline\Pipeline';
+        }
+
+        /*
+         * @var ClientContextInterface
+         */
+        $pipeline = new $class($this);
+
+        if (isset($callable)) {
+            return $pipeline->execute($callable);
+        }
+
+        return $pipeline;
+    }
+
+    /**
+     * Actual publish/subscribe context initializer method.
+     *
+     * @param array $options  Options for the context.
+     * @param mixed $callable Optional callable used to execute the context.
+     *
+     * @return PubSubConsumer|null
+     */
+    protected function createPubSub(array $options = null, $callable = null)
+    {
+        $pubsub = new PubSubConsumer($this, $options);
+
+        if (!isset($callable)) {
+            return $pubsub;
+        }
+
+        foreach ($pubsub as $message) {
+            if (call_user_func($callable, $pubsub, $message) === false) {
+                $pubsub->stop();
+            }
+        }
+    }
+
+    /**
+     * Actual transaction context initializer method.
+     *
+     * @param array $options  Options for the context.
+     * @param mixed $callable Optional callable used to execute the context.
+     *
+     * @return MultiExecTransaction|array
+     */
+    protected function createTransaction(array $options = null, $callable = null)
+    {
+        $transaction = new MultiExecTransaction($this, $options);
+
+        if (isset($callable)) {
+            return $transaction->execute($callable);
+        }
+
+        return $transaction;
+    }
+
+    /**
      * Wraps a callable to make sure that its returned value represents a valid
      * connection type.
      *
-     * @param mixed $callable
      *
      * @return \Closure
      */
@@ -8034,181 +8299,11 @@ class Client implements ClientInterface
     }
 
     /**
-     * {@inheritdoc}
-     */
-    public function getProfile()
-    {
-        return $this->profile;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getOptions()
-    {
-        return $this->options;
-    }
-
-    /**
-     * Creates a new client instance for the specified connection ID or alias,
-     * only when working with an aggregate connection (cluster, replication).
-     * The new client instances uses the same options of the original one.
-     *
-     * @param string $connectionID Identifier of a connection.
-     *
-     * @return Client
-     *
-     * @throws \InvalidArgumentException
-     */
-    public function getClientFor($connectionID)
-    {
-        if (!$connection = $this->getConnectionById($connectionID)) {
-            throw new InvalidArgumentException("Invalid connection ID: $connectionID.");
-        }
-
-        return new static($connection, $this->options);
-    }
-
-    /**
-     * Opens the underlying connection and connects to the server.
-     */
-    public function connect()
-    {
-        $this->connection->connect();
-    }
-
-    /**
-     * Closes the underlying connection and disconnects from the server.
-     */
-    public function disconnect()
-    {
-        $this->connection->disconnect();
-    }
-
-    /**
-     * Closes the underlying connection and disconnects from the server.
-     *
-     * This is the same as `Client::disconnect()` as it does not actually send
-     * the `QUIT` command to Redis, but simply closes the connection.
-     */
-    public function quit()
-    {
-        $this->disconnect();
-    }
-
-    /**
-     * Returns the current state of the underlying connection.
-     *
-     * @return bool
-     */
-    public function isConnected()
-    {
-        return $this->connection->isConnected();
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getConnection()
-    {
-        return $this->connection;
-    }
-
-    /**
-     * Retrieves the specified connection from the aggregate connection when the
-     * client is in cluster or replication mode.
-     *
-     * @param string $connectionID Index or alias of the single connection.
-     *
-     * @return Connection\NodeConnectionInterface
-     *
-     * @throws NotSupportedException
-     */
-    public function getConnectionById($connectionID)
-    {
-        if (!$this->connection instanceof AggregateConnectionInterface) {
-            throw new NotSupportedException(
-                'Retrieving connections by ID is supported only by aggregate connections.'
-            );
-        }
-
-        return $this->connection->getConnectionById($connectionID);
-    }
-
-    /**
-     * Executes a command without filtering its arguments, parsing the response,
-     * applying any prefix to keys or throwing exceptions on Redis errors even
-     * regardless of client options.
-     *
-     * It is possibile to indentify Redis error responses from normal responses
-     * using the second optional argument which is populated by reference.
-     *
-     * @param array $arguments Command arguments as defined by the command signature.
-     * @param bool  $error     Set to TRUE when Redis returned an error response.
-     *
-     * @return mixed
-     */
-    public function executeRaw(array $arguments, &$error = null)
-    {
-        $error = false;
-        $response = $this->connection->executeCommand(
-            new RawCommand($arguments)
-        );
-
-        if ($response instanceof ResponseInterface) {
-            if ($response instanceof ErrorResponseInterface) {
-                $error = true;
-            }
-
-            return (string) $response;
-        }
-
-        return $response;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __call($commandID, $arguments)
-    {
-        return $this->executeCommand(
-            $this->createCommand($commandID, $arguments)
-        );
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function createCommand($commandID, $arguments = array())
-    {
-        return $this->profile->createCommand($commandID, $arguments);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function executeCommand(CommandInterface $command)
-    {
-        $response = $this->connection->executeCommand($command);
-
-        if ($response instanceof ResponseInterface) {
-            if ($response instanceof ErrorResponseInterface) {
-                $response = $this->onErrorResponse($command, $response);
-            }
-
-            return $response;
-        }
-
-        return $command->parseResponse($response);
-    }
-
-    /**
      * Handles -ERR responses returned by Redis.
      *
      * @param CommandInterface       $command  Redis command that generated the error.
      * @param ErrorResponseInterface $response Instance of the error response.
      *
-     * @return mixed
      *
      * @throws ServerException
      */
@@ -8243,7 +8338,6 @@ class Client implements ClientInterface
      * @param string $initializer Method name.
      * @param array  $argv        Arguments for the method.
      *
-     * @return mixed
      */
     private function sharedContextFactory($initializer, $argv = null)
     {
@@ -8264,127 +8358,6 @@ class Client implements ClientInterface
             default:
                 return $this->$initializer($this, $argv);
         }
-    }
-
-    /**
-     * Creates a new pipeline context and returns it, or returns the results of
-     * a pipeline executed inside the optionally provided callable object.
-     *
-     * @param mixed ... Array of options, a callable for execution, or both.
-     *
-     * @return Pipeline|array
-     */
-    public function pipeline(/* arguments */)
-    {
-        return $this->sharedContextFactory('createPipeline', func_get_args());
-    }
-
-    /**
-     * Actual pipeline context initializer method.
-     *
-     * @param array $options  Options for the context.
-     * @param mixed $callable Optional callable used to execute the context.
-     *
-     * @return Pipeline|array
-     */
-    protected function createPipeline(array $options = null, $callable = null)
-    {
-        if (isset($options['atomic']) && $options['atomic']) {
-            $class = 'Predis\Pipeline\Atomic';
-        } elseif (isset($options['fire-and-forget']) && $options['fire-and-forget']) {
-            $class = 'Predis\Pipeline\FireAndForget';
-        } else {
-            $class = 'Predis\Pipeline\Pipeline';
-        }
-
-        /*
-         * @var ClientContextInterface
-         */
-        $pipeline = new $class($this);
-
-        if (isset($callable)) {
-            return $pipeline->execute($callable);
-        }
-
-        return $pipeline;
-    }
-
-    /**
-     * Creates a new transaction context and returns it, or returns the results
-     * of a transaction executed inside the optionally provided callable object.
-     *
-     * @param mixed ... Array of options, a callable for execution, or both.
-     *
-     * @return MultiExecTransaction|array
-     */
-    public function transaction(/* arguments */)
-    {
-        return $this->sharedContextFactory('createTransaction', func_get_args());
-    }
-
-    /**
-     * Actual transaction context initializer method.
-     *
-     * @param array $options  Options for the context.
-     * @param mixed $callable Optional callable used to execute the context.
-     *
-     * @return MultiExecTransaction|array
-     */
-    protected function createTransaction(array $options = null, $callable = null)
-    {
-        $transaction = new MultiExecTransaction($this, $options);
-
-        if (isset($callable)) {
-            return $transaction->execute($callable);
-        }
-
-        return $transaction;
-    }
-
-    /**
-     * Creates a new publis/subscribe context and returns it, or starts its loop
-     * inside the optionally provided callable object.
-     *
-     * @param mixed ... Array of options, a callable for execution, or both.
-     *
-     * @return PubSubConsumer|null
-     */
-    public function pubSubLoop(/* arguments */)
-    {
-        return $this->sharedContextFactory('createPubSub', func_get_args());
-    }
-
-    /**
-     * Actual publish/subscribe context initializer method.
-     *
-     * @param array $options  Options for the context.
-     * @param mixed $callable Optional callable used to execute the context.
-     *
-     * @return PubSubConsumer|null
-     */
-    protected function createPubSub(array $options = null, $callable = null)
-    {
-        $pubsub = new PubSubConsumer($this, $options);
-
-        if (!isset($callable)) {
-            return $pubsub;
-        }
-
-        foreach ($pubsub as $message) {
-            if (call_user_func($callable, $pubsub, $message) === false) {
-                $pubsub->stop();
-            }
-        }
-    }
-
-    /**
-     * Creates a new monitor consumer and returns it.
-     *
-     * @return MonitorConsumer
-     */
-    public function monitor()
-    {
-        return new MonitorConsumer($this);
     }
 }
 
@@ -8407,7 +8380,7 @@ class Autoloader
     {
         $this->directory = $baseDirectory;
         $this->prefix = __NAMESPACE__ . '\\';
-        $this->prefixLength = strlen($this->prefix);
+        $this->prefixLength = mb_strlen($this->prefix);
     }
 
     /**
@@ -8427,8 +8400,8 @@ class Autoloader
      */
     public function autoload($className)
     {
-        if (0 === strpos($className, $this->prefix)) {
-            $parts = explode('\\', substr($className, $this->prefixLength));
+        if (0 === mb_strpos($className, $this->prefix)) {
+            $parts = explode('\\', mb_substr($className, $this->prefixLength));
             $filepath = $this->directory.DIRECTORY_SEPARATOR.implode(DIRECTORY_SEPARATOR, $parts).'.php';
 
             if (is_file($filepath)) {
@@ -8470,7 +8443,6 @@ interface OptionInterface
      * @param OptionsInterface $options Options container.
      * @param mixed            $value   Input value.
      *
-     * @return mixed
      */
     public function filter(OptionsInterface $options, $value);
 
@@ -8479,7 +8451,6 @@ interface OptionInterface
      *
      * @param OptionsInterface $options Options container.
      *
-     * @return mixed
      */
     public function getDefault(OptionsInterface $options);
 }
@@ -8500,22 +8471,13 @@ interface OptionInterface
 interface OptionsInterface
 {
     /**
-     * Returns the default value for the given option.
+     * Returns the value of the given option.
      *
      * @param string $option Name of the option.
      *
      * @return mixed|null
      */
-    public function getDefault($option);
-
-    /**
-     * Checks if the given option has been set by the user upon initialization.
-     *
-     * @param string $option Name of the option.
-     *
-     * @return bool
-     */
-    public function defined($option);
+    public function __get($option);
 
     /**
      * Checks if the given option has been set and does not evaluate to NULL.
@@ -8527,13 +8489,21 @@ interface OptionsInterface
     public function __isset($option);
 
     /**
-     * Returns the value of the given option.
+     * Checks if the given option has been set by the user upon initialization.
+     *
+     * @param string $option Name of the option.
+     *
+     * @return bool
+     */
+    public function defined($option);
+    /**
+     * Returns the default value for the given option.
      *
      * @param string $option Name of the option.
      *
      * @return mixed|null
      */
-    public function __get($option);
+    public function getDefault($option);
 }
 
 /**
@@ -8574,24 +8544,6 @@ class PrefixOption implements OptionInterface
 class ProfileOption implements OptionInterface
 {
     /**
-     * Sets the commands processors that need to be applied to the profile.
-     *
-     * @param OptionsInterface $options Client options.
-     * @param ProfileInterface $profile Server profile.
-     */
-    protected function setProcessors(OptionsInterface $options, ProfileInterface $profile)
-    {
-        if (isset($options->prefix) && $profile instanceof RedisProfile) {
-            // NOTE: directly using __get('prefix') is actually a workaround for
-            // HHVM 2.3.0. It's correct and respects the options interface, it's
-            // just ugly. We will remove this hack when HHVM will fix re-entrant
-            // calls to __get() once and for all.
-
-            $profile->setProcessor($options->__get('prefix'));
-        }
-    }
-
-    /**
      * {@inheritdoc}
      */
     public function filter(OptionsInterface $options, $value)
@@ -8615,6 +8567,23 @@ class ProfileOption implements OptionInterface
         $this->setProcessors($options, $profile);
 
         return $profile;
+    }
+    /**
+     * Sets the commands processors that need to be applied to the profile.
+     *
+     * @param OptionsInterface $options Client options.
+     * @param ProfileInterface $profile Server profile.
+     */
+    protected function setProcessors(OptionsInterface $options, ProfileInterface $profile)
+    {
+        if (isset($options->prefix) && $profile instanceof RedisProfile) {
+            // NOTE: directly using __get('prefix') is actually a workaround for
+            // HHVM 2.3.0. It's correct and respects the options interface, it's
+            // just ugly. We will remove this hack when HHVM will fix re-entrant
+            // calls to __get() once and for all.
+
+            $profile->setProcessor($options->__get('prefix'));
+        }
     }
 }
 
@@ -8674,9 +8643,9 @@ class ReplicationOption implements OptionInterface
  */
 class Options implements OptionsInterface
 {
+    protected $handlers;
     protected $input;
     protected $options;
-    protected $handlers;
 
     /**
      * @param array $options Array of options with their values
@@ -8686,58 +8655,6 @@ class Options implements OptionsInterface
         $this->input = $options;
         $this->options = array();
         $this->handlers = $this->getHandlers();
-    }
-
-    /**
-     * Ensures that the default options are initialized.
-     *
-     * @return array
-     */
-    protected function getHandlers()
-    {
-        return array(
-            'cluster'     => 'Predis\Configuration\ClusterOption',
-            'connections' => 'Predis\Configuration\ConnectionFactoryOption',
-            'exceptions'  => 'Predis\Configuration\ExceptionsOption',
-            'prefix'      => 'Predis\Configuration\PrefixOption',
-            'profile'     => 'Predis\Configuration\ProfileOption',
-            'replication' => 'Predis\Configuration\ReplicationOption',
-        );
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getDefault($option)
-    {
-        if (isset($this->handlers[$option])) {
-            $handler = $this->handlers[$option];
-            $handler = new $handler();
-
-            return $handler->getDefault($this);
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function defined($option)
-    {
-        return (
-            array_key_exists($option, $this->options) ||
-            array_key_exists($option, $this->input)
-        );
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __isset($option)
-    {
-        return (
-            array_key_exists($option, $this->options) ||
-            array_key_exists($option, $this->input)
-        ) && $this->__get($option) !== null;
     }
 
     /**
@@ -8772,6 +8689,58 @@ class Options implements OptionsInterface
 
         return null;
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function __isset($option)
+    {
+        return (
+            array_key_exists($option, $this->options) ||
+            array_key_exists($option, $this->input)
+        ) && $this->__get($option) !== null;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function defined($option)
+    {
+        return (
+            array_key_exists($option, $this->options) ||
+            array_key_exists($option, $this->input)
+        );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getDefault($option)
+    {
+        if (isset($this->handlers[$option])) {
+            $handler = $this->handlers[$option];
+            $handler = new $handler();
+
+            return $handler->getDefault($this);
+        }
+    }
+
+    /**
+     * Ensures that the default options are initialized.
+     *
+     * @return array
+     */
+    protected function getHandlers()
+    {
+        return array(
+            'cluster'     => 'Predis\Configuration\ClusterOption',
+            'connections' => 'Predis\Configuration\ConnectionFactoryOption',
+            'exceptions'  => 'Predis\Configuration\ExceptionsOption',
+            'prefix'      => 'Predis\Configuration\PrefixOption',
+            'profile'     => 'Predis\Configuration\ProfileOption',
+            'replication' => 'Predis\Configuration\ReplicationOption',
+        );
+    }
 }
 
 /**
@@ -8789,7 +8758,8 @@ class ConnectionFactoryOption implements OptionInterface
     {
         if ($value instanceof FactoryInterface) {
             return $value;
-        } elseif (is_array($value)) {
+        }
+        if (is_array($value)) {
             $factory = $this->getDefault($options);
 
             foreach ($value as $scheme => $initializer) {
@@ -8797,11 +8767,11 @@ class ConnectionFactoryOption implements OptionInterface
             }
 
             return $factory;
-        } else {
-            throw new InvalidArgumentException(
-                'Invalid value provided for the connections option.'
-            );
         }
+        throw new InvalidArgumentException(
+            'Invalid value provided for the connections option.'
+        );
+
     }
 
     /**
@@ -8848,30 +8818,6 @@ class ExceptionsOption implements OptionInterface
 class ClusterOption implements OptionInterface
 {
     /**
-     * Creates a new cluster connection from on a known descriptive name.
-     *
-     * @param OptionsInterface $options Instance of the client options.
-     * @param string           $id      Descriptive identifier of the cluster type (`predis`, `redis-cluster`)
-     *
-     * @return ClusterInterface|null
-     */
-    protected function createByDescription(OptionsInterface $options, $id)
-    {
-        switch ($id) {
-            case 'predis':
-            case 'predis-cluster':
-                return new PredisCluster();
-
-            case 'redis':
-            case 'redis-cluster':
-                return new RedisCluster($options->connections);
-
-            default:
-                return;
-        }
-    }
-
-    /**
      * {@inheritdoc}
      */
     public function filter(OptionsInterface $options, $value)
@@ -8895,6 +8841,29 @@ class ClusterOption implements OptionInterface
     public function getDefault(OptionsInterface $options)
     {
         return new PredisCluster();
+    }
+    /**
+     * Creates a new cluster connection from on a known descriptive name.
+     *
+     * @param OptionsInterface $options Instance of the client options.
+     * @param string           $id      Descriptive identifier of the cluster type (`predis`, `redis-cluster`)
+     *
+     * @return ClusterInterface|null
+     */
+    protected function createByDescription(OptionsInterface $options, $id)
+    {
+        switch ($id) {
+            case 'predis':
+            case 'predis-cluster':
+                return new PredisCluster();
+
+            case 'redis':
+            case 'redis-cluster':
+                return new RedisCluster($options->connections);
+
+            default:
+                return;
+        }
     }
 }
 
@@ -8922,18 +8891,17 @@ interface ResponseInterface
 interface ErrorInterface extends ResponseInterface
 {
     /**
-     * Returns the error message
-     *
-     * @return string
-     */
-    public function getMessage();
-
-    /**
      * Returns the error type (e.g. ERR, ASK, MOVED)
      *
      * @return string
      */
     public function getErrorType();
+    /**
+     * Returns the error message
+     *
+     * @return string
+     */
+    public function getMessage();
 }
 
 /**
@@ -8944,9 +8912,9 @@ interface ErrorInterface extends ResponseInterface
 class Status implements ResponseInterface
 {
     private static $OK;
-    private static $QUEUED;
 
     private $payload;
+    private static $QUEUED;
 
     /**
      * @param string $payload Payload of the status response as returned by Redis.
@@ -8962,16 +8930,6 @@ class Status implements ResponseInterface
      * @return string
      */
     public function __toString()
-    {
-        return $this->payload;
-    }
-
-    /**
-     * Returns the payload of status response.
-     *
-     * @return string
-     */
-    public function getPayload()
     {
         return $this->payload;
     }
@@ -9001,6 +8959,16 @@ class Status implements ResponseInterface
                 return new self($payload);
         }
     }
+
+    /**
+     * Returns the payload of status response.
+     *
+     * @return string
+     */
+    public function getPayload()
+    {
+        return $this->payload;
+    }
 }
 
 /**
@@ -9022,11 +8990,13 @@ class Error implements ErrorInterface
     }
 
     /**
-     * {@inheritdoc}
+     * Converts the object to its string representation.
+     *
+     * @return string
      */
-    public function getMessage()
+    public function __toString()
     {
-        return $this->message;
+        return $this->getMessage();
     }
 
     /**
@@ -9040,13 +9010,11 @@ class Error implements ErrorInterface
     }
 
     /**
-     * Converts the object to its string representation.
-     *
-     * @return string
+     * {@inheritdoc}
      */
-    public function __toString()
+    public function getMessage()
     {
-        return $this->getMessage();
+        return $this->message;
     }
 }
 
@@ -9105,7 +9073,6 @@ interface ResponseHandlerInterface
      * @param CompositeConnectionInterface $connection Redis connection.
      * @param string                       $payload    String payload.
      *
-     * @return mixed
      */
     public function handle(CompositeConnectionInterface $connection, $payload);
 }
@@ -9148,7 +9115,7 @@ class StreamableMultiBulkResponse implements ResponseHandlerInterface
     {
         $length = (int) $payload;
 
-        if ("$length" != $payload) {
+        if ("$length" !== $payload) {
             CommunicationException::handle(new ProtocolException(
                 $connection,
                 "Cannot parse '$payload' as a valid length for a multi-bulk response."
@@ -9203,7 +9170,7 @@ class MultiBulkResponse implements ResponseHandlerInterface
                     $handlersCache[$prefix] = $handler;
                 }
 
-                $list[$i] = $handler->handle($connection, substr($header, 1));
+                $list[$i] = $handler->handle($connection, mb_substr($header, 1));
             }
         }
 
@@ -9282,10 +9249,10 @@ class BulkResponse implements ResponseHandlerInterface
         }
 
         if ($length >= 0) {
-            return substr($connection->readBuffer($length + 2), 0, -2);
+            return mb_substr($connection->readBuffer($length + 2), 0, -2);
         }
 
-        if ($length == -1) {
+        if ($length === -1) {
             return null;
         }
 
@@ -9323,15 +9290,15 @@ use InvalidArgumentException;
 abstract class CursorBasedIterator implements Iterator
 {
     protected $client;
-    protected $match;
     protected $count;
+    protected $current;
+    protected $cursor;
+    protected $elements;
+    protected $fetchmore;
+    protected $match;
+    protected $position;
 
     protected $valid;
-    protected $fetchmore;
-    protected $elements;
-    protected $cursor;
-    protected $position;
-    protected $current;
 
     /**
      * @param ClientInterface $client Client connected to Redis.
@@ -9345,6 +9312,112 @@ abstract class CursorBasedIterator implements Iterator
         $this->count = $count;
 
         $this->reset();
+    }
+
+    /**
+     * Fetches a new set of elements from the remote collection, effectively
+     * advancing the iteration process.
+     *
+     * @return array
+     */
+    abstract protected function executeCommand();
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function current()
+    {
+        return $this->current;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function key()
+    {
+        return $this->position;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function next()
+    {
+        tryFetch: {
+            if (!$this->elements && $this->fetchmore) {
+                $this->fetch();
+            }
+
+            if ($this->elements) {
+                $this->extractNext();
+            } elseif ($this->cursor) {
+                goto tryFetch;
+            } else {
+                $this->valid = false;
+            }
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function rewind()
+    {
+        $this->reset();
+        $this->next();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function valid()
+    {
+        return $this->valid;
+    }
+
+    /**
+     * Extracts next values for key() and current().
+     */
+    protected function extractNext()
+    {
+        $this->position++;
+        $this->current = array_shift($this->elements);
+    }
+
+    /**
+     * Populates the local buffer of elements fetched from the server during
+     * the iteration.
+     */
+    protected function fetch()
+    {
+        list($cursor, $elements) = $this->executeCommand();
+
+        if (!$cursor) {
+            $this->fetchmore = false;
+        }
+
+        $this->cursor = $cursor;
+        $this->elements = $elements;
+    }
+
+    /**
+     * Returns an array of options for the `SCAN` command.
+     *
+     * @return array
+     */
+    protected function getScanOptions()
+    {
+        $options = array();
+
+        if (mb_strlen($this->match) > 0) {
+            $options['MATCH'] = $this->match;
+        }
+
+        if ($this->count > 0) {
+            $options['COUNT'] = $this->count;
+        }
+
+        return $options;
     }
 
     /**
@@ -9374,112 +9447,6 @@ abstract class CursorBasedIterator implements Iterator
         $this->cursor = 0;
         $this->position = -1;
         $this->current = null;
-    }
-
-    /**
-     * Returns an array of options for the `SCAN` command.
-     *
-     * @return array
-     */
-    protected function getScanOptions()
-    {
-        $options = array();
-
-        if (strlen($this->match) > 0) {
-            $options['MATCH'] = $this->match;
-        }
-
-        if ($this->count > 0) {
-            $options['COUNT'] = $this->count;
-        }
-
-        return $options;
-    }
-
-    /**
-     * Fetches a new set of elements from the remote collection, effectively
-     * advancing the iteration process.
-     *
-     * @return array
-     */
-    abstract protected function executeCommand();
-
-    /**
-     * Populates the local buffer of elements fetched from the server during
-     * the iteration.
-     */
-    protected function fetch()
-    {
-        list($cursor, $elements) = $this->executeCommand();
-
-        if (!$cursor) {
-            $this->fetchmore = false;
-        }
-
-        $this->cursor = $cursor;
-        $this->elements = $elements;
-    }
-
-    /**
-     * Extracts next values for key() and current().
-     */
-    protected function extractNext()
-    {
-        $this->position++;
-        $this->current = array_shift($this->elements);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function rewind()
-    {
-        $this->reset();
-        $this->next();
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function current()
-    {
-        return $this->current;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function key()
-    {
-        return $this->position;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function next()
-    {
-        tryFetch: {
-            if (!$this->elements && $this->fetchmore) {
-                $this->fetch();
-            }
-
-            if ($this->elements) {
-                $this->extractNext();
-            } elseif ($this->cursor) {
-                goto tryFetch;
-            } else {
-                $this->valid = false;
-            }
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function valid()
-    {
-        return $this->valid;
     }
 }
 
@@ -9646,20 +9613,20 @@ class ListKey implements Iterator
 {
     protected $client;
     protected $count;
+    protected $current;
+    protected $elements;
+    protected $fetchmore;
     protected $key;
+    protected $position;
 
     protected $valid;
-    protected $fetchmore;
-    protected $elements;
-    protected $position;
-    protected $current;
 
     /**
      * @param ClientInterface $client Client connected to Redis.
      * @param string          $key    Redis list key.
      * @param int             $count  Number of items retrieved on each fetch operation.
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     public function __construct(ClientInterface $client, $key, $count = 10)
     {
@@ -9674,78 +9641,6 @@ class ListKey implements Iterator
         $this->count = $count;
 
         $this->reset();
-    }
-
-    /**
-     * Ensures that the client instance supports the specified Redis command
-     * required to fetch elements from the server to perform the iteration.
-     *
-     * @param ClientInterface $client    Client connected to Redis.
-     * @param string          $commandID Command ID.
-     *
-     * @throws NotSupportedException
-     */
-    protected function requiredCommand(ClientInterface $client, $commandID)
-    {
-        if (!$client->getProfile()->supportsCommand($commandID)) {
-            throw new NotSupportedException("The current profile does not support '$commandID'.");
-        }
-    }
-
-    /**
-     * Resets the inner state of the iterator.
-     */
-    protected function reset()
-    {
-        $this->valid = true;
-        $this->fetchmore = true;
-        $this->elements = array();
-        $this->position = -1;
-        $this->current = null;
-    }
-
-    /**
-     * Fetches a new set of elements from the remote collection, effectively
-     * advancing the iteration process.
-     *
-     * @return array
-     */
-    protected function executeCommand()
-    {
-        return $this->client->lrange($this->key, $this->position + 1, $this->position + $this->count);
-    }
-
-    /**
-     * Populates the local buffer of elements fetched from the server during the
-     * iteration.
-     */
-    protected function fetch()
-    {
-        $elements = $this->executeCommand();
-
-        if (count($elements) < $this->count) {
-            $this->fetchmore = false;
-        }
-
-        $this->elements = $elements;
-    }
-
-    /**
-     * Extracts next values for key() and current().
-     */
-    protected function extractNext()
-    {
-        $this->position++;
-        $this->current = array_shift($this->elements);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function rewind()
-    {
-        $this->reset();
-        $this->next();
     }
 
     /**
@@ -9783,9 +9678,81 @@ class ListKey implements Iterator
     /**
      * {@inheritdoc}
      */
+    public function rewind()
+    {
+        $this->reset();
+        $this->next();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function valid()
     {
         return $this->valid;
+    }
+
+    /**
+     * Fetches a new set of elements from the remote collection, effectively
+     * advancing the iteration process.
+     *
+     * @return array
+     */
+    protected function executeCommand()
+    {
+        return $this->client->lrange($this->key, $this->position + 1, $this->position + $this->count);
+    }
+
+    /**
+     * Extracts next values for key() and current().
+     */
+    protected function extractNext()
+    {
+        $this->position++;
+        $this->current = array_shift($this->elements);
+    }
+
+    /**
+     * Populates the local buffer of elements fetched from the server during the
+     * iteration.
+     */
+    protected function fetch()
+    {
+        $elements = $this->executeCommand();
+
+        if (count($elements) < $this->count) {
+            $this->fetchmore = false;
+        }
+
+        $this->elements = $elements;
+    }
+
+    /**
+     * Ensures that the client instance supports the specified Redis command
+     * required to fetch elements from the server to perform the iteration.
+     *
+     * @param ClientInterface $client    Client connected to Redis.
+     * @param string          $commandID Command ID.
+     *
+     * @throws NotSupportedException
+     */
+    protected function requiredCommand(ClientInterface $client, $commandID)
+    {
+        if (!$client->getProfile()->supportsCommand($commandID)) {
+            throw new NotSupportedException("The current profile does not support '$commandID'.");
+        }
+    }
+
+    /**
+     * Resets the inner state of the iterator.
+     */
+    protected function reset()
+    {
+        $this->valid = true;
+        $this->fetchmore = true;
+        $this->elements = array();
+        $this->position = -1;
+        $this->current = null;
     }
 }
 
@@ -9813,6 +9780,12 @@ use Predis\Cluster\Hash\CRC16;
 interface StrategyInterface
 {
     /**
+     * Returns a distributor instance to be used by the cluster.
+     *
+     * @return DistributorInterface
+     */
+    public function getDistributor();
+    /**
      * Returns a slot for the given command used for clustering distribution or
      * NULL when this is not possible.
      *
@@ -9831,13 +9804,6 @@ interface StrategyInterface
      * @return int
      */
     public function getSlotByKey($key);
-
-    /**
-     * Returns a distributor instance to be used by the cluster.
-     *
-     * @return DistributorInterface
-     */
-    public function getDistributor();
 }
 
 /**
@@ -9855,6 +9821,115 @@ abstract class ClusterStrategy implements StrategyInterface
     public function __construct()
     {
         $this->commands = $this->getDefaultCommands();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function getSlot(CommandInterface $command)
+    {
+        $slot = $command->getSlot();
+
+        if (!isset($slot) && isset($this->commands[$cmdID = $command->getId()])) {
+            $key = call_user_func($this->commands[$cmdID], $command);
+
+            if (isset($key)) {
+                $slot = $this->getSlotByKey($key);
+                $command->setSlot($slot);
+            }
+        }
+
+        return $slot;
+    }
+
+    /**
+     * Returns the list of IDs for the supported commands.
+     *
+     * @return array
+     */
+    final public function getSupportedCommands()
+    {
+        return array_keys($this->commands);
+    }
+
+    /**
+     * Sets an handler for the specified command ID.
+     *
+     * The signature of the callback must have a single parameter of type
+     * Predis\Command\CommandInterface.
+     *
+     * When the callback argument is omitted or NULL, the previously associated
+     * handler for the specified command ID is removed.
+     *
+     * @param string $commandID Command ID.
+     * @param mixed  $callback  A valid callable object, or NULL to unset the handler.
+     *
+     * @throws InvalidArgumentException
+     */
+    final public function setCommandHandler($commandID, $callback = null)
+    {
+        $commandID = mb_strtoupper($commandID);
+
+        if (!isset($callback)) {
+            unset($this->commands[$commandID]);
+
+            return;
+        }
+
+        if (!is_callable($callback)) {
+            throw new InvalidArgumentException(
+                "The argument must be a callable object or NULL."
+            );
+        }
+
+        $this->commands[$commandID] = $callback;
+    }
+
+    /**
+     * Checks if the specified array of keys will generate the same hash.
+     *
+     * @param array $keys Array of keys.
+     *
+     * @return bool
+     */
+    protected function checkSameSlotForKeys(array $keys)
+    {
+        if (!$count = count($keys)) {
+            return false;
+        }
+
+        $currentSlot = $this->getSlotByKey($keys[0]);
+
+        for ($i = 1; $i < $count; $i++) {
+            $nextSlot = $this->getSlotByKey($keys[$i]);
+
+            if ($currentSlot !== $nextSlot) {
+                return false;
+            }
+
+            $currentSlot = $nextSlot;
+        }
+
+        return true;
+    }
+
+    /**
+     * Returns only the hashable part of a key (delimited by "{...}"), or the
+     * whole key if a key tag is not found in the string.
+     *
+     * @param string $key A key.
+     *
+     * @return string
+     */
+    protected function extractKeyTag($key)
+    {
+        if (false !== $start = mb_strpos($key, '{')) {
+            if (false !== ($end = mb_strpos($key, '}', $start)) && $end !== ++$start) {
+                $key = mb_substr($key, $start, $end - $start);
+            }
+        }
+
+        return $key;
     }
 
     /**
@@ -9992,46 +10067,52 @@ abstract class ClusterStrategy implements StrategyInterface
     }
 
     /**
-     * Returns the list of IDs for the supported commands.
+     * Extracts the key from a command with multiple keys only when all keys in
+     * the arguments array produce the same hash.
      *
-     * @return array
+     * @param CommandInterface $command Command instance.
+     *
+     * @return string|null
      */
-    public function getSupportedCommands()
+    protected function getKeyFromAllArguments(CommandInterface $command)
     {
-        return array_keys($this->commands);
+        $arguments = $command->getArguments();
+
+        if ($this->checkSameSlotForKeys($arguments)) {
+            return $arguments[0];
+        }
     }
 
     /**
-     * Sets an handler for the specified command ID.
+     * Extracts the key from BITOP command.
      *
-     * The signature of the callback must have a single parameter of type
-     * Predis\Command\CommandInterface.
+     * @param CommandInterface $command Command instance.
      *
-     * When the callback argument is omitted or NULL, the previously associated
-     * handler for the specified command ID is removed.
-     *
-     * @param string $commandID Command ID.
-     * @param mixed  $callback  A valid callable object, or NULL to unset the handler.
-     *
-     * @throws \InvalidArgumentException
+     * @return string|null
      */
-    public function setCommandHandler($commandID, $callback = null)
+    protected function getKeyFromBitOp(CommandInterface $command)
     {
-        $commandID = strtoupper($commandID);
+        $arguments = $command->getArguments();
 
-        if (!isset($callback)) {
-            unset($this->commands[$commandID]);
-
-            return;
+        if ($this->checkSameSlotForKeys(array_slice($arguments, 1, count($arguments)))) {
+            return $arguments[1];
         }
+    }
 
-        if (!is_callable($callback)) {
-            throw new InvalidArgumentException(
-                "The argument must be a callable object or NULL."
-            );
+    /**
+     * Extracts the key from BLPOP and BRPOP commands.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     * @return string|null
+     */
+    protected function getKeyFromBlockingListCommands(CommandInterface $command)
+    {
+        $arguments = $command->getArguments();
+
+        if ($this->checkSameSlotForKeys(array_slice($arguments, 0, count($arguments) - 1))) {
+            return $arguments[0];
         }
-
-        $this->commands[$commandID] = $callback;
     }
 
     /**
@@ -10054,23 +10135,6 @@ abstract class ClusterStrategy implements StrategyInterface
      *
      * @return string|null
      */
-    protected function getKeyFromAllArguments(CommandInterface $command)
-    {
-        $arguments = $command->getArguments();
-
-        if ($this->checkSameSlotForKeys($arguments)) {
-            return $arguments[0];
-        }
-    }
-
-    /**
-     * Extracts the key from a command with multiple keys only when all keys in
-     * the arguments array produce the same hash.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return string|null
-     */
     protected function getKeyFromInterleavedArguments(CommandInterface $command)
     {
         $arguments = $command->getArguments();
@@ -10079,55 +10143,6 @@ abstract class ClusterStrategy implements StrategyInterface
         for ($i = 0; $i < count($arguments); $i += 2) {
             $keys[] = $arguments[$i];
         }
-
-        if ($this->checkSameSlotForKeys($keys)) {
-            return $arguments[0];
-        }
-    }
-
-    /**
-     * Extracts the key from BLPOP and BRPOP commands.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return string|null
-     */
-    protected function getKeyFromBlockingListCommands(CommandInterface $command)
-    {
-        $arguments = $command->getArguments();
-
-        if ($this->checkSameSlotForKeys(array_slice($arguments, 0, count($arguments) - 1))) {
-            return $arguments[0];
-        }
-    }
-
-    /**
-     * Extracts the key from BITOP command.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return string|null
-     */
-    protected function getKeyFromBitOp(CommandInterface $command)
-    {
-        $arguments = $command->getArguments();
-
-        if ($this->checkSameSlotForKeys(array_slice($arguments, 1, count($arguments)))) {
-            return $arguments[1];
-        }
-    }
-
-    /**
-     * Extracts the key from ZINTERSTORE and ZUNIONSTORE commands.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return string|null
-     */
-    protected function getKeyFromZsetAggregationCommands(CommandInterface $command)
-    {
-        $arguments = $command->getArguments();
-        $keys = array_merge(array($arguments[0]), array_slice($arguments, 2, $arguments[1]));
 
         if ($this->checkSameSlotForKeys($keys)) {
             return $arguments[0];
@@ -10155,69 +10170,20 @@ abstract class ClusterStrategy implements StrategyInterface
     }
 
     /**
-     * {@inheritdoc}
+     * Extracts the key from ZINTERSTORE and ZUNIONSTORE commands.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     * @return string|null
      */
-    public function getSlot(CommandInterface $command)
+    protected function getKeyFromZsetAggregationCommands(CommandInterface $command)
     {
-        $slot = $command->getSlot();
+        $arguments = $command->getArguments();
+        $keys = array_merge(array($arguments[0]), array_slice($arguments, 2, $arguments[1]));
 
-        if (!isset($slot) && isset($this->commands[$cmdID = $command->getId()])) {
-            $key = call_user_func($this->commands[$cmdID], $command);
-
-            if (isset($key)) {
-                $slot = $this->getSlotByKey($key);
-                $command->setSlot($slot);
-            }
+        if ($this->checkSameSlotForKeys($keys)) {
+            return $arguments[0];
         }
-
-        return $slot;
-    }
-
-    /**
-     * Checks if the specified array of keys will generate the same hash.
-     *
-     * @param array $keys Array of keys.
-     *
-     * @return bool
-     */
-    protected function checkSameSlotForKeys(array $keys)
-    {
-        if (!$count = count($keys)) {
-            return false;
-        }
-
-        $currentSlot = $this->getSlotByKey($keys[0]);
-
-        for ($i = 1; $i < $count; $i++) {
-            $nextSlot = $this->getSlotByKey($keys[$i]);
-
-            if ($currentSlot !== $nextSlot) {
-                return false;
-            }
-
-            $currentSlot = $nextSlot;
-        }
-
-        return true;
-    }
-
-    /**
-     * Returns only the hashable part of a key (delimited by "{...}"), or the
-     * whole key if a key tag is not found in the string.
-     *
-     * @param string $key A key.
-     *
-     * @return string
-     */
-    protected function extractKeyTag($key)
-    {
-        if (false !== $start = strpos($key, '{')) {
-            if (false !== ($end = strpos($key, '}', $start)) && $end !== ++$start) {
-                $key = substr($key, $start, $end - $start);
-            }
-        }
-
-        return $key;
     }
 }
 
@@ -10238,6 +10204,14 @@ class PredisStrategy extends ClusterStrategy
         parent::__construct();
 
         $this->distributor = $distributor ?: new HashRing();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getDistributor()
+    {
+        return $this->distributor;
     }
 
     /**
@@ -10275,14 +10249,6 @@ class PredisStrategy extends ClusterStrategy
 
         return true;
     }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getDistributor()
-    {
-        return $this->distributor;
-    }
 }
 
 /**
@@ -10308,22 +10274,22 @@ class RedisStrategy extends ClusterStrategy
     /**
      * {@inheritdoc}
      */
+    public function getDistributor()
+    {
+        throw new NotSupportedException(
+            'This cluster strategy does not provide an external distributor'
+        );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function getSlotByKey($key)
     {
         $key  = $this->extractKeyTag($key);
         $slot = $this->hashGenerator->hash($key) & 0x3FFF;
 
         return $slot;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getDistributor()
-    {
-        throw new NotSupportedException(
-            'This cluster strategy does not provide an external distributor'
-        );
     }
 }
 
@@ -10344,21 +10310,19 @@ use Predis\Connection\CompositeConnectionInterface;
 interface ProtocolProcessorInterface
 {
     /**
+     * Reads a response from a connection to Redis.
+     *
+     * @param CompositeConnectionInterface $connection Redis connection.
+     *
+     */
+    public function read(CompositeConnectionInterface $connection);
+    /**
      * Writes a request over a connection to Redis.
      *
      * @param CompositeConnectionInterface $connection Redis connection.
      * @param CommandInterface             $command    Command instance.
      */
     public function write(CompositeConnectionInterface $connection, CommandInterface $command);
-
-    /**
-     * Reads a response from a connection to Redis.
-     *
-     * @param CompositeConnectionInterface $connection Redis connection.
-     *
-     * @return mixed
-     */
-    public function read(CompositeConnectionInterface $connection);
 }
 
 /**
@@ -10374,7 +10338,6 @@ interface ResponseReaderInterface
      *
      * @param CompositeConnectionInterface $connection Redis connection.
      *
-     * @return mixed
      */
     public function read(CompositeConnectionInterface $connection);
 }
@@ -10446,13 +10409,6 @@ interface ClusterInterface extends AggregateConnectionInterface
 interface ReplicationInterface extends AggregateConnectionInterface
 {
     /**
-     * Switches the internal connection instance in use.
-     *
-     * @param string $connection Alias of a connection
-     */
-    public function switchTo($connection);
-
-    /**
      * Returns the connection instance currently in use by the aggregate
      * connection.
      *
@@ -10473,6 +10429,12 @@ interface ReplicationInterface extends AggregateConnectionInterface
      * @return NodeConnectionInterface
      */
     public function getSlaves();
+    /**
+     * Switches the internal connection instance in use.
+     *
+     * @param string $connection Alias of a connection
+     */
+    public function switchTo($connection);
 }
 
 /**
@@ -10497,15 +10459,15 @@ interface ReplicationInterface extends AggregateConnectionInterface
  *
  * @author Daniele Alessandri <suppakilla@gmail.com>
  */
-class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
+class RedisCluster implements ClusterInterface, Countable, IteratorAggregate
 {
-    private $useClusterSlots = true;
+    private $connections;
     private $defaultParameters = array();
     private $pool = array();
     private $slots = array();
     private $slotsMap;
     private $strategy;
-    private $connections;
+    private $useClusterSlots = true;
 
     /**
      * @param FactoryInterface  $connections Optional connection factory.
@@ -10517,6 +10479,218 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
     ) {
         $this->connections = $connections;
         $this->strategy = $strategy ?: new RedisClusterStrategy();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function add(NodeConnectionInterface $connection)
+    {
+        $this->pool[(string) $connection] = $connection;
+        unset($this->slotsMap);
+    }
+
+    /**
+     * Generates an updated slots map fetching the cluster configuration using
+     * the CLUSTER SLOTS command against the specified node or a random one from
+     * the pool.
+     *
+     * @param NodeConnectionInterface $connection Optional connection instance.
+     *
+     * @return array
+     */
+    public function askSlotsMap(NodeConnectionInterface $connection = null)
+    {
+        if (!$connection && !$connection = $this->getRandomConnection()) {
+            return array();
+        }
+        $command = RawCommand::create('CLUSTER', 'SLOTS');
+        $response = $connection->executeCommand($command);
+
+        foreach ($response as $slots) {
+            // We only support master servers for now, so we ignore subsequent
+            // elements in the $slots array identifying slaves.
+            list($start, $end, $master) = $slots;
+
+            if ($master[0] === '') {
+                $this->setSlots($start, $end, (string) $connection);
+            } else {
+                $this->setSlots($start, $end, "{$master[0]}:{$master[1]}");
+            }
+        }
+
+        return $this->slotsMap;
+    }
+
+    /**
+     * Generates the current slots map by guessing the cluster configuration out
+     * of the connection parameters of the connections in the pool.
+     *
+     * Generation is based on the same algorithm used by Redis to generate the
+     * cluster, so it is most effective when all of the connections supplied on
+     * initialization have the "slots" parameter properly set accordingly to the
+     * current cluster configuration.
+     */
+    public function buildSlotsMap()
+    {
+        $this->slotsMap = array();
+
+        foreach ($this->pool as $connectionID => $connection) {
+            $parameters = $connection->getParameters();
+
+            if (!isset($parameters->slots)) {
+                continue;
+            }
+
+            $slots = explode('-', $parameters->slots, 2);
+            $this->setSlots($slots[0], $slots[1], $connectionID);
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function connect()
+    {
+        if ($connection = $this->getRandomConnection()) {
+            $connection->connect();
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function count()
+    {
+        return count($this->pool);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function disconnect()
+    {
+        foreach ($this->pool as $connection) {
+            $connection->disconnect();
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function executeCommand(CommandInterface $command)
+    {
+        $connection = $this->getConnection($command);
+        $response = $connection->executeCommand($command);
+
+        if ($response instanceof ErrorResponseInterface) {
+            return $this->onErrorResponse($command, $response);
+        }
+
+        return $response;
+    }
+
+    /**
+     * Returns the underlying command hash strategy used to hash commands by
+     * using keys found in their arguments.
+     *
+     * @return StrategyInterface
+     */
+    public function getClusterStrategy()
+    {
+        return $this->strategy;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getConnection(CommandInterface $command)
+    {
+        $slot = $this->strategy->getSlot($command);
+
+        if (!isset($slot)) {
+            throw new NotSupportedException(
+                "Cannot use '{$command->getId()}' with redis-cluster."
+            );
+        }
+
+        if (isset($this->slots[$slot])) {
+            return $this->slots[$slot];
+        }
+        return $this->getConnectionBySlot($slot);
+
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getConnectionById($connectionID)
+    {
+        if (isset($this->pool[$connectionID])) {
+            return $this->pool[$connectionID];
+        }
+    }
+
+    /**
+     * Returns the connection currently associated to a given slot.
+     *
+     * @param int $slot Slot index.
+     *
+     * @return NodeConnectionInterface
+     *
+     * @throws OutOfBoundsException
+     */
+    public function getConnectionBySlot($slot)
+    {
+        if ($slot < 0x0000 || $slot > 0x3FFF) {
+            throw new OutOfBoundsException("Invalid slot [$slot].");
+        }
+
+        if (isset($this->slots[$slot])) {
+            return $this->slots[$slot];
+        }
+
+        $connectionID = $this->guessNode($slot);
+
+        if (!$connection = $this->getConnectionById($connectionID)) {
+            $connection = $this->createConnection($connectionID);
+            $this->pool[$connectionID] = $connection;
+        }
+
+        return $this->slots[$slot] = $connection;
+    }
+
+    /**
+     * Returns the underlying connection factory used to create new connection
+     * instances to Redis nodes indicated by redis-cluster.
+     *
+     * @return FactoryInterface
+     */
+    public function getConnectionFactory()
+    {
+        return $this->connections;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getIterator()
+    {
+        return new ArrayIterator(array_values($this->pool));
+    }
+
+    /**
+     * Returns the current slots map for the cluster.
+     *
+     * @return array
+     */
+    public function getSlotsMap()
+    {
+        if (!isset($this->slotsMap)) {
+            $this->slotsMap = array();
+        }
+
+        return $this->slotsMap;
     }
 
     /**
@@ -10536,30 +10710,9 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
     /**
      * {@inheritdoc}
      */
-    public function connect()
+    public function readResponse(CommandInterface $command)
     {
-        if ($connection = $this->getRandomConnection()) {
-            $connection->connect();
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function disconnect()
-    {
-        foreach ($this->pool as $connection) {
-            $connection->disconnect();
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function add(NodeConnectionInterface $connection)
-    {
-        $this->pool[(string) $connection] = $connection;
-        unset($this->slotsMap);
+        return $this->getConnection($command)->readResponse($command);
     }
 
     /**
@@ -10601,74 +10754,21 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
     }
 
     /**
-     * Generates the current slots map by guessing the cluster configuration out
-     * of the connection parameters of the connections in the pool.
+     * Sets a default array of connection parameters to be applied when creating
+     * new connection instances on the fly when they are not part of the initial
+     * pool supplied upon cluster initialization.
      *
-     * Generation is based on the same algorithm used by Redis to generate the
-     * cluster, so it is most effective when all of the connections supplied on
-     * initialization have the "slots" parameter properly set accordingly to the
-     * current cluster configuration.
+     * These parameters are not applied to connections added to the pool using
+     * the add() method.
+     *
+     * @param array $parameters Array of connection parameters.
      */
-    public function buildSlotsMap()
+    public function setDefaultParameters(array $parameters)
     {
-        $this->slotsMap = array();
-
-        foreach ($this->pool as $connectionID => $connection) {
-            $parameters = $connection->getParameters();
-
-            if (!isset($parameters->slots)) {
-                continue;
-            }
-
-            $slots = explode('-', $parameters->slots, 2);
-            $this->setSlots($slots[0], $slots[1], $connectionID);
-        }
-    }
-
-    /**
-     * Generates an updated slots map fetching the cluster configuration using
-     * the CLUSTER SLOTS command against the specified node or a random one from
-     * the pool.
-     *
-     * @param NodeConnectionInterface $connection Optional connection instance.
-     *
-     * @return array
-     */
-    public function askSlotsMap(NodeConnectionInterface $connection = null)
-    {
-        if (!$connection && !$connection = $this->getRandomConnection()) {
-            return array();
-        }
-        $command = RawCommand::create('CLUSTER', 'SLOTS');
-        $response = $connection->executeCommand($command);
-
-        foreach ($response as $slots) {
-            // We only support master servers for now, so we ignore subsequent
-            // elements in the $slots array identifying slaves.
-            list($start, $end, $master) = $slots;
-
-            if ($master[0] === '') {
-                $this->setSlots($start, $end, (string) $connection);
-            } else {
-                $this->setSlots($start, $end, "{$master[0]}:{$master[1]}");
-            }
-        }
-
-        return $this->slotsMap;
-    }
-
-    /**
-     * Returns the current slots map for the cluster.
-     *
-     * @return array
-     */
-    public function getSlotsMap()
-    {
-        if (!isset($this->slotsMap)) {
-            $this->slotsMap = array();
-        }
-
-        return $this->slotsMap;
+        $this->defaultParameters = array_merge(
+            $this->defaultParameters,
+            $parameters ?: array()
+        );
     }
 
     /**
@@ -10678,7 +10778,7 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
      * @param int                            $last       Last slot of the range.
      * @param NodeConnectionInterface|string $connection ID or connection instance.
      *
-     * @throws \OutOfBoundsException
+     * @throws OutOfBoundsException
      */
     public function setSlots($first, $last, $connection)
     {
@@ -10693,6 +10793,65 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
 
         $slots = array_fill($first, $last - $first + 1, (string) $connection);
         $this->slotsMap = $this->getSlotsMap() + $slots;
+    }
+
+    /**
+     * Enables automatic fetching of the current slots map from one of the nodes
+     * using the CLUSTER SLOTS command. This option is disabled by default but
+     * asking the current slots map to Redis upon -MOVED responses may reduce
+     * overhead by eliminating the trial-and-error nature of the node guessing
+     * procedure, mostly when targeting many keys that would end up in a lot of
+     * redirections.
+     *
+     * The slots map can still be manually fetched using the askSlotsMap()
+     * method whether or not this option is enabled.
+     *
+     * @param bool $value Enable or disable the use of CLUSTER SLOTS.
+     */
+    public function useClusterSlots($value)
+    {
+        $this->useClusterSlots = (bool) $value;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function writeRequest(CommandInterface $command)
+    {
+        $this->getConnection($command)->writeRequest($command);
+    }
+
+    /**
+     * Creates a new connection instance from the given connection ID.
+     *
+     * @param string $connectionID Identifier for the connection.
+     *
+     * @return NodeConnectionInterface
+     */
+    protected function createConnection($connectionID)
+    {
+        $host = explode(':', $connectionID, 2);
+
+        $parameters = array_merge($this->defaultParameters, array(
+            'host' => $host[0],
+            'port' => $host[1],
+        ));
+
+        $connection = $this->connections->create($parameters);
+
+        return $connection;
+    }
+
+    /**
+     * Returns a random connection from the pool.
+     *
+     * @return NodeConnectionInterface|null
+     */
+    protected function getRandomConnection()
+    {
+        if ($this->pool) {
+            return $this->pool[array_rand($this->pool)];
+        }
     }
 
     /**
@@ -10722,98 +10881,6 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
     }
 
     /**
-     * Creates a new connection instance from the given connection ID.
-     *
-     * @param string $connectionID Identifier for the connection.
-     *
-     * @return NodeConnectionInterface
-     */
-    protected function createConnection($connectionID)
-    {
-        $host = explode(':', $connectionID, 2);
-
-        $parameters = array_merge($this->defaultParameters, array(
-            'host' => $host[0],
-            'port' => $host[1],
-        ));
-
-        $connection = $this->connections->create($parameters);
-
-        return $connection;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getConnection(CommandInterface $command)
-    {
-        $slot = $this->strategy->getSlot($command);
-
-        if (!isset($slot)) {
-            throw new NotSupportedException(
-                "Cannot use '{$command->getId()}' with redis-cluster."
-            );
-        }
-
-        if (isset($this->slots[$slot])) {
-            return $this->slots[$slot];
-        } else {
-            return $this->getConnectionBySlot($slot);
-        }
-    }
-
-    /**
-     * Returns the connection currently associated to a given slot.
-     *
-     * @param int $slot Slot index.
-     *
-     * @return NodeConnectionInterface
-     *
-     * @throws \OutOfBoundsException
-     */
-    public function getConnectionBySlot($slot)
-    {
-        if ($slot < 0x0000 || $slot > 0x3FFF) {
-            throw new OutOfBoundsException("Invalid slot [$slot].");
-        }
-
-        if (isset($this->slots[$slot])) {
-            return $this->slots[$slot];
-        }
-
-        $connectionID = $this->guessNode($slot);
-
-        if (!$connection = $this->getConnectionById($connectionID)) {
-            $connection = $this->createConnection($connectionID);
-            $this->pool[$connectionID] = $connection;
-        }
-
-        return $this->slots[$slot] = $connection;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getConnectionById($connectionID)
-    {
-        if (isset($this->pool[$connectionID])) {
-            return $this->pool[$connectionID];
-        }
-    }
-
-    /**
-     * Returns a random connection from the pool.
-     *
-     * @return NodeConnectionInterface|null
-     */
-    protected function getRandomConnection()
-    {
-        if ($this->pool) {
-            return $this->pool[array_rand($this->pool)];
-        }
-    }
-
-    /**
      * Permanently associates the connection instance to a new slot.
      * The connection is added to the connections pool if not yet included.
      *
@@ -10827,12 +10894,31 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
     }
 
     /**
+     * Handles -ASK responses by executing again the command against the node
+     * indicated by the Redis response.
+     *
+     * @param  CommandInterface $command Command that generated the -ASK response.
+     * @param  string           $details Parameters of the -ASK response.
+     */
+    protected function onAskResponse(CommandInterface $command, $details)
+    {
+        list($slot, $connectionID) = explode(' ', $details, 2);
+
+        if (!$connection = $this->getConnectionById($connectionID)) {
+            $connection = $this->createConnection($connectionID);
+        }
+        $connection->executeCommand(RawCommand::create('ASKING'));
+        $response = $connection->executeCommand($command);
+
+        return $response;
+    }
+
+    /**
      * Handles -ERR responses returned by Redis.
      *
      * @param CommandInterface       $command Command that generated the -ERR response.
      * @param ErrorResponseInterface $error   Redis error response object.
      *
-     * @return mixed
      */
     protected function onErrorResponse(CommandInterface $command, ErrorResponseInterface $error)
     {
@@ -10857,7 +10943,6 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
      * @param CommandInterface $command Command that generated the -MOVED response.
      * @param string           $details Parameters of the -MOVED response.
      *
-     * @return mixed
      */
     protected function onMovedResponse(CommandInterface $command, $details)
     {
@@ -10876,132 +10961,6 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
 
         return $response;
     }
-
-    /**
-     * Handles -ASK responses by executing again the command against the node
-     * indicated by the Redis response.
-     *
-     * @param  CommandInterface $command Command that generated the -ASK response.
-     * @param  string           $details Parameters of the -ASK response.
-     * @return mixed
-     */
-    protected function onAskResponse(CommandInterface $command, $details)
-    {
-        list($slot, $connectionID) = explode(' ', $details, 2);
-
-        if (!$connection = $this->getConnectionById($connectionID)) {
-            $connection = $this->createConnection($connectionID);
-        }
-        $connection->executeCommand(RawCommand::create('ASKING'));
-        $response = $connection->executeCommand($command);
-
-        return $response;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function writeRequest(CommandInterface $command)
-    {
-        $this->getConnection($command)->writeRequest($command);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function readResponse(CommandInterface $command)
-    {
-        return $this->getConnection($command)->readResponse($command);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function executeCommand(CommandInterface $command)
-    {
-        $connection = $this->getConnection($command);
-        $response = $connection->executeCommand($command);
-
-        if ($response instanceof ErrorResponseInterface) {
-            return $this->onErrorResponse($command, $response);
-        }
-
-        return $response;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function count()
-    {
-        return count($this->pool);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getIterator()
-    {
-        return new ArrayIterator(array_values($this->pool));
-    }
-
-    /**
-     * Returns the underlying command hash strategy used to hash commands by
-     * using keys found in their arguments.
-     *
-     * @return StrategyInterface
-     */
-    public function getClusterStrategy()
-    {
-        return $this->strategy;
-    }
-
-    /**
-     * Returns the underlying connection factory used to create new connection
-     * instances to Redis nodes indicated by redis-cluster.
-     *
-     * @return FactoryInterface
-     */
-    public function getConnectionFactory()
-    {
-        return $this->connections;
-    }
-
-    /**
-     * Enables automatic fetching of the current slots map from one of the nodes
-     * using the CLUSTER SLOTS command. This option is disabled by default but
-     * asking the current slots map to Redis upon -MOVED responses may reduce
-     * overhead by eliminating the trial-and-error nature of the node guessing
-     * procedure, mostly when targeting many keys that would end up in a lot of
-     * redirections.
-     *
-     * The slots map can still be manually fetched using the askSlotsMap()
-     * method whether or not this option is enabled.
-     *
-     * @param bool $value Enable or disable the use of CLUSTER SLOTS.
-     */
-    public function useClusterSlots($value)
-    {
-        $this->useClusterSlots = (bool) $value;
-    }
-
-    /**
-     * Sets a default array of connection parameters to be applied when creating
-     * new connection instances on the fly when they are not part of the initial
-     * pool supplied upon cluster initialization.
-     *
-     * These parameters are not applied to connections added to the pool using
-     * the add() method.
-     *
-     * @param array $parameters Array of connection parameters.
-     */
-    public function setDefaultParameters(array $parameters)
-    {
-        $this->defaultParameters = array_merge(
-            $this->defaultParameters,
-            $parameters ?: array()
-        );
-    }
 }
 
 /**
@@ -11011,11 +10970,11 @@ class RedisCluster implements ClusterInterface, IteratorAggregate, Countable
  * @author Daniele Alessandri <suppakilla@gmail.com>
  * @todo Add the ability to remove connections from pool.
  */
-class PredisCluster implements ClusterInterface, IteratorAggregate, Countable
+class PredisCluster implements ClusterInterface, Countable, IteratorAggregate
 {
+    private $distributor;
     private $pool;
     private $strategy;
-    private $distributor;
 
     /**
      * @param StrategyInterface $strategy Optional cluster strategy.
@@ -11025,40 +10984,6 @@ class PredisCluster implements ClusterInterface, IteratorAggregate, Countable
         $this->pool = array();
         $this->strategy = $strategy ?: new PredisStrategy();
         $this->distributor = $this->strategy->getDistributor();
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function isConnected()
-    {
-        foreach ($this->pool as $connection) {
-            if ($connection->isConnected()) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function connect()
-    {
-        foreach ($this->pool as $connection) {
-            $connection->connect();
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function disconnect()
-    {
-        foreach ($this->pool as $connection) {
-            $connection->disconnect();
-        }
     }
 
     /**
@@ -11081,32 +11006,65 @@ class PredisCluster implements ClusterInterface, IteratorAggregate, Countable
     /**
      * {@inheritdoc}
      */
-    public function remove(NodeConnectionInterface $connection)
+    public function connect()
     {
-        if (($id = array_search($connection, $this->pool, true)) !== false) {
-            unset($this->pool[$id]);
-            $this->distributor->remove($connection);
-
-            return true;
+        foreach ($this->pool as $connection) {
+            $connection->connect();
         }
-
-        return false;
     }
 
     /**
-     * Removes a connection instance using its alias or index.
-     *
-     * @param string $connectionID Alias or index of a connection.
-     *
-     * @return bool Returns true if the connection was in the pool.
+     * {@inheritdoc}
      */
-    public function removeById($connectionID)
+    public function count()
     {
-        if ($connection = $this->getConnectionById($connectionID)) {
-            return $this->remove($connection);
+        return count($this->pool);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function disconnect()
+    {
+        foreach ($this->pool as $connection) {
+            $connection->disconnect();
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function executeCommand(CommandInterface $command)
+    {
+        return $this->getConnection($command)->executeCommand($command);
+    }
+
+    /**
+     * Executes the specified Redis command on all the nodes of a cluster.
+     *
+     * @param CommandInterface $command A Redis command.
+     *
+     * @return array
+     */
+    public function executeCommandOnNodes(CommandInterface $command)
+    {
+        $responses = array();
+        foreach ($this->pool as $connection) {
+            $responses[] = $connection->executeCommand($command);
         }
 
-        return false;
+        return $responses;
+    }
+
+    /**
+     * Returns the underlying command hash strategy used to hash commands by
+     * using keys found in their arguments.
+     *
+     * @return StrategyInterface
+     */
+    public function getClusterStrategy()
+    {
+        return $this->strategy;
     }
 
     /**
@@ -11151,25 +11109,6 @@ class PredisCluster implements ClusterInterface, IteratorAggregate, Countable
     }
 
     /**
-     * Returns the underlying command hash strategy used to hash commands by
-     * using keys found in their arguments.
-     *
-     * @return StrategyInterface
-     */
-    public function getClusterStrategy()
-    {
-        return $this->strategy;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function count()
-    {
-        return count($this->pool);
-    }
-
-    /**
      * {@inheritdoc}
      */
     public function getIterator()
@@ -11180,9 +11119,15 @@ class PredisCluster implements ClusterInterface, IteratorAggregate, Countable
     /**
      * {@inheritdoc}
      */
-    public function writeRequest(CommandInterface $command)
+    public function isConnected()
     {
-        $this->getConnection($command)->writeRequest($command);
+        foreach ($this->pool as $connection) {
+            if ($connection->isConnected()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -11196,26 +11141,40 @@ class PredisCluster implements ClusterInterface, IteratorAggregate, Countable
     /**
      * {@inheritdoc}
      */
-    public function executeCommand(CommandInterface $command)
+    public function remove(NodeConnectionInterface $connection)
     {
-        return $this->getConnection($command)->executeCommand($command);
+        if (($id = array_search($connection, $this->pool, true)) !== false) {
+            unset($this->pool[$id]);
+            $this->distributor->remove($connection);
+
+            return true;
+        }
+
+        return false;
     }
 
     /**
-     * Executes the specified Redis command on all the nodes of a cluster.
+     * Removes a connection instance using its alias or index.
      *
-     * @param CommandInterface $command A Redis command.
+     * @param string $connectionID Alias or index of a connection.
      *
-     * @return array
+     * @return bool Returns true if the connection was in the pool.
      */
-    public function executeCommandOnNodes(CommandInterface $command)
+    public function removeById($connectionID)
     {
-        $responses = array();
-        foreach ($this->pool as $connection) {
-            $responses[] = $connection->executeCommand($command);
+        if ($connection = $this->getConnectionById($connectionID)) {
+            return $this->remove($connection);
         }
 
-        return $responses;
+        return false;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function writeRequest(CommandInterface $command)
+    {
+        $this->getConnection($command)->writeRequest($command);
     }
 }
 
@@ -11227,10 +11186,10 @@ class PredisCluster implements ClusterInterface, IteratorAggregate, Countable
  */
 class MasterSlaveReplication implements ReplicationInterface
 {
-    protected $strategy;
+    protected $current;
     protected $master;
     protected $slaves;
-    protected $current;
+    protected $strategy;
 
     /**
      * {@inheritdoc}
@@ -11242,21 +11201,11 @@ class MasterSlaveReplication implements ReplicationInterface
     }
 
     /**
-     * Checks if one master and at least one slave have been defined.
+     * {@inheritdoc}
      */
-    protected function check()
+    public function __sleep()
     {
-        if (!isset($this->master) || !$this->slaves) {
-            throw new RuntimeException('Replication needs one master and at least one slave.');
-        }
-    }
-
-    /**
-     * Resets the connection state.
-     */
-    protected function reset()
-    {
-        $this->current = null;
+        return array('master', 'slaves', 'strategy');
     }
 
     /**
@@ -11278,23 +11227,36 @@ class MasterSlaveReplication implements ReplicationInterface
     /**
      * {@inheritdoc}
      */
-    public function remove(NodeConnectionInterface $connection)
+    public function connect()
     {
-        if ($connection->getParameters()->alias === 'master') {
-            $this->master = null;
-            $this->reset();
-
-            return true;
-        } else {
-            if (($id = array_search($connection, $this->slaves, true)) !== false) {
-                unset($this->slaves[$id]);
-                $this->reset();
-
-                return true;
-            }
+        if ($this->current === null) {
+            $this->check();
+            $this->current = $this->pickSlave();
         }
 
-        return false;
+        $this->current->connect();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function disconnect()
+    {
+        if ($this->master) {
+            $this->master->disconnect();
+        }
+
+        foreach ($this->slaves as $connection) {
+            $connection->disconnect();
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function executeCommand(CommandInterface $command)
+    {
+        return $this->getConnection($command)->executeCommand($command);
     }
 
     /**
@@ -11341,6 +11303,78 @@ class MasterSlaveReplication implements ReplicationInterface
     /**
      * {@inheritdoc}
      */
+    public function getCurrent()
+    {
+        return $this->current;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getMaster()
+    {
+        return $this->master;
+    }
+
+    /**
+     * Returns the underlying replication strategy.
+     *
+     * @return ReplicationStrategy
+     */
+    public function getReplicationStrategy()
+    {
+        return $this->strategy;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getSlaves()
+    {
+        return array_values($this->slaves);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function isConnected()
+    {
+        return $this->current ? $this->current->isConnected() : false;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function readResponse(CommandInterface $command)
+    {
+        return $this->getConnection($command)->readResponse($command);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function remove(NodeConnectionInterface $connection)
+    {
+        if ($connection->getParameters()->alias === 'master') {
+            $this->master = null;
+            $this->reset();
+
+            return true;
+        }
+        if (($id = array_search($connection, $this->slaves, true)) !== false) {
+            unset($this->slaves[$id]);
+            $this->reset();
+
+            return true;
+        }
+
+
+        return false;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function switchTo($connection)
     {
         $this->check();
@@ -11358,35 +11392,19 @@ class MasterSlaveReplication implements ReplicationInterface
     /**
      * {@inheritdoc}
      */
-    public function getCurrent()
+    public function writeRequest(CommandInterface $command)
     {
-        return $this->current;
+        $this->getConnection($command)->writeRequest($command);
     }
 
     /**
-     * {@inheritdoc}
+     * Checks if one master and at least one slave have been defined.
      */
-    public function getMaster()
+    protected function check()
     {
-        return $this->master;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getSlaves()
-    {
-        return array_values($this->slaves);
-    }
-
-    /**
-     * Returns the underlying replication strategy.
-     *
-     * @return ReplicationStrategy
-     */
-    public function getReplicationStrategy()
-    {
-        return $this->strategy;
+        if (!isset($this->master) || !$this->slaves) {
+            throw new RuntimeException('Replication needs one master and at least one slave.');
+        }
     }
 
     /**
@@ -11400,70 +11418,11 @@ class MasterSlaveReplication implements ReplicationInterface
     }
 
     /**
-     * {@inheritdoc}
+     * Resets the connection state.
      */
-    public function isConnected()
+    protected function reset()
     {
-        return $this->current ? $this->current->isConnected() : false;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function connect()
-    {
-        if ($this->current === null) {
-            $this->check();
-            $this->current = $this->pickSlave();
-        }
-
-        $this->current->connect();
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function disconnect()
-    {
-        if ($this->master) {
-            $this->master->disconnect();
-        }
-
-        foreach ($this->slaves as $connection) {
-            $connection->disconnect();
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function writeRequest(CommandInterface $command)
-    {
-        $this->getConnection($command)->writeRequest($command);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function readResponse(CommandInterface $command)
-    {
-        return $this->getConnection($command)->readResponse($command);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function executeCommand(CommandInterface $command)
-    {
-        return $this->getConnection($command)->executeCommand($command);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __sleep()
-    {
-        return array('master', 'slaves', 'strategy');
+        $this->current = null;
     }
 }
 
@@ -11530,131 +11489,6 @@ class Pipeline implements ClientContextInterface
     }
 
     /**
-     * Queues a command instance into the pipeline buffer.
-     *
-     * @param CommandInterface $command Command to be queued in the buffer.
-     */
-    protected function recordCommand(CommandInterface $command)
-    {
-        $this->pipeline->enqueue($command);
-    }
-
-    /**
-     * Queues a command instance into the pipeline buffer.
-     *
-     * @param CommandInterface $command Command instance to be queued in the buffer.
-     *
-     * @return $this
-     */
-    public function executeCommand(CommandInterface $command)
-    {
-        $this->recordCommand($command);
-
-        return $this;
-    }
-
-    /**
-     * Throws an exception on -ERR responses returned by Redis.
-     *
-     * @param ConnectionInterface    $connection Redis connection that returned the error.
-     * @param ErrorResponseInterface $response   Instance of the error response.
-     *
-     * @throws ServerException
-     */
-    protected function exception(ConnectionInterface $connection, ErrorResponseInterface $response)
-    {
-        $connection->disconnect();
-        $message = $response->getMessage();
-
-        throw new ServerException($message);
-    }
-
-    /**
-     * Returns the underlying connection to be used by the pipeline.
-     *
-     * @return ConnectionInterface
-     */
-    protected function getConnection()
-    {
-        $connection = $this->getClient()->getConnection();
-
-        if ($connection instanceof ReplicationInterface) {
-            $connection->switchTo('master');
-        }
-
-        return $connection;
-    }
-
-    /**
-     * Implements the logic to flush the queued commands and read the responses
-     * from the current connection.
-     *
-     * @param ConnectionInterface $connection Current connection instance.
-     * @param SplQueue            $commands   Queued commands.
-     *
-     * @return array
-     */
-    protected function executePipeline(ConnectionInterface $connection, SplQueue $commands)
-    {
-        foreach ($commands as $command) {
-            $connection->writeRequest($command);
-        }
-
-        $responses = array();
-        $exceptions = $this->throwServerExceptions();
-
-        while (!$commands->isEmpty()) {
-            $command = $commands->dequeue();
-            $response = $connection->readResponse($command);
-
-            if (!$response instanceof ResponseInterface) {
-                $responses[] = $command->parseResponse($response);
-            } elseif ($response instanceof ErrorResponseInterface && $exceptions) {
-                $this->exception($connection, $response);
-            } else {
-                $responses[] = $response;
-            }
-        }
-
-        return $responses;
-    }
-
-    /**
-     * Flushes the buffer holding all of the commands queued so far.
-     *
-     * @param bool $send Specifies if the commands in the buffer should be sent to Redis.
-     *
-     * @return $this
-     */
-    public function flushPipeline($send = true)
-    {
-        if ($send && !$this->pipeline->isEmpty()) {
-            $responses = $this->executePipeline($this->getConnection(), $this->pipeline);
-            $this->responses = array_merge($this->responses, $responses);
-        } else {
-            $this->pipeline = new SplQueue();
-        }
-
-        return $this;
-    }
-
-    /**
-     * Marks the running status of the pipeline.
-     *
-     * @param bool $bool Sets the running status of the pipeline.
-     *
-     * @throws ClientException
-     */
-    private function setRunning($bool)
-    {
-        if ($bool && $this->running) {
-            throw new ClientException('The current pipeline context is already being executed.');
-        }
-
-        $this->running = $bool;
-    }
-
-    /**
      * Handles the actual execution of the whole pipeline.
      *
      * @param mixed $callable Optional callback for execution.
@@ -11693,13 +11527,36 @@ class Pipeline implements ClientContextInterface
     }
 
     /**
-     * Returns if the pipeline should throw exceptions on server errors.
+     * Queues a command instance into the pipeline buffer.
      *
-     * @return bool
+     * @param CommandInterface $command Command instance to be queued in the buffer.
+     *
+     * @return $this
      */
-    protected function throwServerExceptions()
+    public function executeCommand(CommandInterface $command)
     {
-        return (bool) $this->client->getOptions()->exceptions;
+        $this->recordCommand($command);
+
+        return $this;
+    }
+
+    /**
+     * Flushes the buffer holding all of the commands queued so far.
+     *
+     * @param bool $send Specifies if the commands in the buffer should be sent to Redis.
+     *
+     * @return $this
+     */
+    public function flushPipeline($send = true)
+    {
+        if ($send && !$this->pipeline->isEmpty()) {
+            $responses = $this->executePipeline($this->getConnection(), $this->pipeline);
+            $this->responses = array_merge($this->responses, $responses);
+        } else {
+            $this->pipeline = new SplQueue();
+        }
+
+        return $this;
     }
 
     /**
@@ -11710,6 +11567,108 @@ class Pipeline implements ClientContextInterface
     public function getClient()
     {
         return $this->client;
+    }
+
+    /**
+     * Throws an exception on -ERR responses returned by Redis.
+     *
+     * @param ConnectionInterface    $connection Redis connection that returned the error.
+     * @param ErrorResponseInterface $response   Instance of the error response.
+     *
+     * @throws ServerException
+     */
+    protected function exception(ConnectionInterface $connection, ErrorResponseInterface $response)
+    {
+        $connection->disconnect();
+        $message = $response->getMessage();
+
+        throw new ServerException($message);
+    }
+
+    /**
+     * Implements the logic to flush the queued commands and read the responses
+     * from the current connection.
+     *
+     * @param ConnectionInterface $connection Current connection instance.
+     * @param SplQueue            $commands   Queued commands.
+     *
+     * @return array
+     */
+    protected function executePipeline(ConnectionInterface $connection, SplQueue $commands)
+    {
+        foreach ($commands as $command) {
+            $connection->writeRequest($command);
+        }
+
+        $responses = array();
+        $exceptions = $this->throwServerExceptions();
+
+        while (!$commands->isEmpty()) {
+            $command = $commands->dequeue();
+            $response = $connection->readResponse($command);
+
+            if (!$response instanceof ResponseInterface) {
+                $responses[] = $command->parseResponse($response);
+            } elseif ($response instanceof ErrorResponseInterface && $exceptions) {
+                $this->exception($connection, $response);
+            } else {
+                $responses[] = $response;
+            }
+        }
+
+        return $responses;
+    }
+
+    /**
+     * Returns the underlying connection to be used by the pipeline.
+     *
+     * @return ConnectionInterface
+     */
+    protected function getConnection()
+    {
+        $connection = $this->getClient()->getConnection();
+
+        if ($connection instanceof ReplicationInterface) {
+            $connection->switchTo('master');
+        }
+
+        return $connection;
+    }
+
+    /**
+     * Queues a command instance into the pipeline buffer.
+     *
+     * @param CommandInterface $command Command to be queued in the buffer.
+     */
+    protected function recordCommand(CommandInterface $command)
+    {
+        $this->pipeline->enqueue($command);
+    }
+
+    /**
+     * Returns if the pipeline should throw exceptions on server errors.
+     *
+     * @return bool
+     */
+    protected function throwServerExceptions()
+    {
+        return (bool) $this->client->getOptions()->exceptions;
+    }
+
+    /**
+     * Marks the running status of the pipeline.
+     *
+     * @param bool $bool Sets the running status of the pipeline.
+     *
+     * @throws ClientException
+     */
+    private function setRunning($bool)
+    {
+        if ($bool && $this->running) {
+            throw new ClientException('The current pipeline context is already being executed.');
+        }
+
+        $this->running = $bool;
     }
 }
 
@@ -11744,62 +11703,6 @@ class FireAndForget extends Pipeline
  */
 class ConnectionErrorProof extends Pipeline
 {
-    /**
-     * {@inheritdoc}
-     */
-    protected function getConnection()
-    {
-        return $this->getClient()->getConnection();
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function executePipeline(ConnectionInterface $connection, SplQueue $commands)
-    {
-        if ($connection instanceof NodeConnectionInterface) {
-            return $this->executeSingleNode($connection, $commands);
-        } elseif ($connection instanceof ClusterInterface) {
-            return $this->executeCluster($connection, $commands);
-        } else {
-            $class = get_class($connection);
-
-            throw new NotSupportedException("The connection class '$class' is not supported.");
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function executeSingleNode(NodeConnectionInterface $connection, SplQueue $commands)
-    {
-        $responses  = array();
-        $sizeOfPipe = count($commands);
-
-        foreach ($commands as $command) {
-            try {
-                $connection->writeRequest($command);
-            } catch (CommunicationException $exception) {
-                return array_fill(0, $sizeOfPipe, $exception);
-            }
-        }
-
-        for ($i = 0; $i < $sizeOfPipe; $i++) {
-            $command = $commands->dequeue();
-
-            try {
-                $responses[$i] = $connection->readResponse($command);
-            } catch (CommunicationException $exception) {
-                $add = count($commands) - count($responses);
-                $responses = array_merge($responses, array_fill(0, $add, $exception));
-
-                break;
-            }
-        }
-
-        return $responses;
-    }
-
     /**
      * {@inheritdoc}
      */
@@ -11844,6 +11747,62 @@ class ConnectionErrorProof extends Pipeline
 
         return $responses;
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function executePipeline(ConnectionInterface $connection, SplQueue $commands)
+    {
+        if ($connection instanceof NodeConnectionInterface) {
+            return $this->executeSingleNode($connection, $commands);
+        }
+        if ($connection instanceof ClusterInterface) {
+            return $this->executeCluster($connection, $commands);
+        }
+        $class = get_class($connection);
+
+        throw new NotSupportedException("The connection class '$class' is not supported.");
+
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function executeSingleNode(NodeConnectionInterface $connection, SplQueue $commands)
+    {
+        $responses  = array();
+        $sizeOfPipe = count($commands);
+
+        foreach ($commands as $command) {
+            try {
+                $connection->writeRequest($command);
+            } catch (CommunicationException $exception) {
+                return array_fill(0, $sizeOfPipe, $exception);
+            }
+        }
+
+        for ($i = 0; $i < $sizeOfPipe; $i++) {
+            $command = $commands->dequeue();
+
+            try {
+                $responses[$i] = $connection->readResponse($command);
+            } catch (CommunicationException $exception) {
+                $add = count($commands) - count($responses);
+                $responses = array_merge($responses, array_fill(0, $add, $exception));
+
+                break;
+            }
+        }
+
+        return $responses;
+    }
+    /**
+     * {@inheritdoc}
+     */
+    protected function getConnection()
+    {
+        return $this->getClient()->getConnection();
+    }
 }
 
 /**
@@ -11865,22 +11824,6 @@ class Atomic extends Pipeline
         }
 
         parent::__construct($client);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function getConnection()
-    {
-        $connection = $this->getClient()->getConnection();
-
-        if (!$connection instanceof NodeConnectionInterface) {
-            $class = __CLASS__;
-
-            throw new ClientException("The class '$class' does not support aggregate connections.");
-        }
-
-        return $connection;
     }
 
     /**
@@ -11943,6 +11886,22 @@ class Atomic extends Pipeline
 
         return $responses;
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function getConnection()
+    {
+        $connection = $this->getClient()->getConnection();
+
+        if (!$connection instanceof NodeConnectionInterface) {
+            $class = __CLASS__;
+
+            throw new ClientException("The class '$class' does not support aggregate connections.");
+        }
+
+        return $connection;
+    }
 }
 
 /* --------------------------------------------------------------------------- */
@@ -11969,48 +11928,27 @@ interface DistributorInterface
     public function add($node, $weight = null);
 
     /**
-     * Removes a node from the distributor.
-     *
-     * @param mixed $node Node object.
-     */
-    public function remove($node);
-
-    /**
-     * Returns the corresponding slot of a node from the distributor using the
-     * computed hash of a key.
-     *
-     * @param mixed $hash
-     *
-     * @return mixed
-     */
-    public function getSlot($hash);
-
-    /**
-     * Returns a node from the distributor using its assigned slot ID.
-     *
-     * @param mixed $slot
-     *
-     * @return mixed|null
-     */
-    public function getBySlot($slot);
-
-    /**
-     * Returns a node from the distributor using the computed hash of a key.
-     *
-     * @param mixed $hash
-     *
-     * @return mixed
-     */
-    public function getByHash($hash);
-
-    /**
      * Returns a node from the distributor mapping to the specified value.
      *
      * @param string $value
      *
-     * @return mixed
      */
     public function get($value);
+
+    /**
+     * Returns a node from the distributor using the computed hash of a key.
+     *
+     *
+     */
+    public function getByHash($hash);
+
+    /**
+     * Returns a node from the distributor using its assigned slot ID.
+     *
+     *
+     * @return mixed|null
+     */
+    public function getBySlot($slot);
 
     /**
      * Returns the underlying hash generator instance.
@@ -12018,6 +11956,21 @@ interface DistributorInterface
      * @return HashGeneratorInterface
      */
     public function getHashGenerator();
+
+    /**
+     * Returns the corresponding slot of a node from the distributor using the
+     * computed hash of a key.
+     *
+     *
+     */
+    public function getSlot($hash);
+
+    /**
+     * Removes a node from the distributor.
+     *
+     * @param mixed $node Node object.
+     */
+    public function remove($node);
 }
 
 /**
@@ -12032,13 +11985,13 @@ class HashRing implements DistributorInterface, HashGeneratorInterface
 {
     public const DEFAULT_REPLICAS = 128;
     public const DEFAULT_WEIGHT   = 100;
+    private $nodeHashCallback;
+    private $nodes = array();
+    private $replicas;
 
     private $ring;
     private $ringKeys;
     private $ringKeysCount;
-    private $replicas;
-    private $nodeHashCallback;
-    private $nodes = array();
 
     /**
      * @param int   $replicas         Number of replicas in the ring.
@@ -12071,6 +12024,80 @@ class HashRing implements DistributorInterface, HashGeneratorInterface
     /**
      * {@inheritdoc}
      */
+    public function get($value)
+    {
+        $hash = $this->hash($value);
+        $node = $this->getByHash($hash);
+
+        return $node;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getByHash($hash)
+    {
+        return $this->ring[$this->getSlot($hash)];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getBySlot($slot)
+    {
+        $this->initialize();
+
+        if (isset($this->ring[$slot])) {
+            return $this->ring[$slot];
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getHashGenerator()
+    {
+        return $this;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getSlot($hash)
+    {
+        $this->initialize();
+
+        $ringKeys = $this->ringKeys;
+        $upper = $this->ringKeysCount - 1;
+        $lower = 0;
+
+        while ($lower <= $upper) {
+            $index = ($lower + $upper) >> 1;
+            $item = $ringKeys[$index];
+
+            if ($item > $hash) {
+                $upper = $index - 1;
+            } elseif ($item < $hash) {
+                $lower = $index + 1;
+            } else {
+                return $item;
+            }
+        }
+
+        return $ringKeys[$this->wrapAroundStrategy($upper, $lower, $this->ringKeysCount)];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function hash($value)
+    {
+        return crc32($value);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function remove($node)
     {
         // A node is removed by resetting the ring so that it's recreated from
@@ -12088,25 +12115,52 @@ class HashRing implements DistributorInterface, HashGeneratorInterface
     }
 
     /**
-     * Resets the distributor.
+     * Implements the logic needed to add a node to the hashring.
+     *
+     * @param array $ring        Source hashring.
+     * @param mixed $node        Node object to be added.
+     * @param int   $totalNodes  Total number of nodes.
+     * @param int   $replicas    Number of replicas in the ring.
+     * @param float $weightRatio Weight ratio for the node.
      */
-    private function reset()
+    protected function addNodeToRing(&$ring, $node, $totalNodes, $replicas, $weightRatio)
     {
-        unset(
-            $this->ring,
-            $this->ringKeys,
-            $this->ringKeysCount
-        );
+        $nodeObject = $node['object'];
+        $nodeHash = $this->getNodeHash($nodeObject);
+        $replicas = (int) round($weightRatio * $totalNodes * $replicas);
+
+        for ($i = 0; $i < $replicas; $i++) {
+            $key = crc32("$nodeHash:$i");
+            $ring[$key] = $nodeObject;
+        }
     }
 
     /**
-     * Returns the initialization status of the distributor.
-     *
-     * @return bool
+     * {@inheritdoc}
      */
-    private function isInitialized()
+    protected function getNodeHash($nodeObject)
     {
-        return isset($this->ringKeys);
+        if (!isset($this->nodeHashCallback)) {
+            return (string) $nodeObject;
+        }
+
+        return call_user_func($this->nodeHashCallback, $nodeObject);
+    }
+
+    /**
+     * Implements a strategy to deal with wrap-around errors during binary searches.
+     *
+     * @param int $upper
+     * @param int $lower
+     * @param int $ringKeysCount
+     *
+     * @return int
+     */
+    protected function wrapAroundStrategy($upper, $lower, $ringKeysCount)
+    {
+        // Binary search for the last item in ringkeys with a value less or
+        // equal to the key. If no such item exists, return the last item.
+        return $upper >= 0 ? $upper : $ringKeysCount - 1;
     }
 
     /**
@@ -12153,126 +12207,25 @@ class HashRing implements DistributorInterface, HashGeneratorInterface
     }
 
     /**
-     * Implements the logic needed to add a node to the hashring.
+     * Returns the initialization status of the distributor.
      *
-     * @param array $ring        Source hashring.
-     * @param mixed $node        Node object to be added.
-     * @param int   $totalNodes  Total number of nodes.
-     * @param int   $replicas    Number of replicas in the ring.
-     * @param float $weightRatio Weight ratio for the node.
+     * @return bool
      */
-    protected function addNodeToRing(&$ring, $node, $totalNodes, $replicas, $weightRatio)
+    private function isInitialized()
     {
-        $nodeObject = $node['object'];
-        $nodeHash = $this->getNodeHash($nodeObject);
-        $replicas = (int) round($weightRatio * $totalNodes * $replicas);
-
-        for ($i = 0; $i < $replicas; $i++) {
-            $key = crc32("$nodeHash:$i");
-            $ring[$key] = $nodeObject;
-        }
+        return isset($this->ringKeys);
     }
 
     /**
-     * {@inheritdoc}
+     * Resets the distributor.
      */
-    protected function getNodeHash($nodeObject)
+    private function reset()
     {
-        if (!isset($this->nodeHashCallback)) {
-            return (string) $nodeObject;
-        }
-
-        return call_user_func($this->nodeHashCallback, $nodeObject);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function hash($value)
-    {
-        return crc32($value);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getByHash($hash)
-    {
-        return $this->ring[$this->getSlot($hash)];
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getBySlot($slot)
-    {
-        $this->initialize();
-
-        if (isset($this->ring[$slot])) {
-            return $this->ring[$slot];
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getSlot($hash)
-    {
-        $this->initialize();
-
-        $ringKeys = $this->ringKeys;
-        $upper = $this->ringKeysCount - 1;
-        $lower = 0;
-
-        while ($lower <= $upper) {
-            $index = ($lower + $upper) >> 1;
-            $item = $ringKeys[$index];
-
-            if ($item > $hash) {
-                $upper = $index - 1;
-            } elseif ($item < $hash) {
-                $lower = $index + 1;
-            } else {
-                return $item;
-            }
-        }
-
-        return $ringKeys[$this->wrapAroundStrategy($upper, $lower, $this->ringKeysCount)];
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function get($value)
-    {
-        $hash = $this->hash($value);
-        $node = $this->getByHash($hash);
-
-        return $node;
-    }
-
-    /**
-     * Implements a strategy to deal with wrap-around errors during binary searches.
-     *
-     * @param int $upper
-     * @param int $lower
-     * @param int $ringKeysCount
-     *
-     * @return int
-     */
-    protected function wrapAroundStrategy($upper, $lower, $ringKeysCount)
-    {
-        // Binary search for the last item in ringkeys with a value less or
-        // equal to the key. If no such item exists, return the last item.
-        return $upper >= 0 ? $upper : $ringKeysCount - 1;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getHashGenerator()
-    {
-        return $this;
+        unset(
+            $this->ring,
+            $this->ringKeys,
+            $this->ringKeysCount
+        );
     }
 }
 
@@ -12299,6 +12252,16 @@ class KetamaRing extends HashRing
     /**
      * {@inheritdoc}
      */
+    public function hash($value)
+    {
+        $hash = unpack('V', md5($value, true));
+
+        return $hash[1];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     protected function addNodeToRing(&$ring, $node, $totalNodes, $replicas, $weightRatio)
     {
         $nodeObject = $node['object'];
@@ -12312,16 +12275,6 @@ class KetamaRing extends HashRing
                 $ring[$key] = $nodeObject;
             }
         }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function hash($value)
-    {
-        $hash = unpack('V', md5($value, true));
-
-        return $hash[1];
     }
 
     /**
@@ -12368,7 +12321,7 @@ use UnexpectedValueException;
  *
  * @author Daniele Alessandri <suppakilla@gmail.com>
  */
-abstract class MultiBulkIterator implements Iterator, Countable, ResponseInterface
+abstract class MultiBulkIterator implements Countable, Iterator, ResponseInterface
 {
     protected $current;
     protected $position;
@@ -12377,44 +12330,7 @@ abstract class MultiBulkIterator implements Iterator, Countable, ResponseInterfa
     /**
      * {@inheritdoc}
      */
-    public function rewind()
-    {
-        // NOOP
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function current()
-    {
-        return $this->current;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function key()
-    {
-        return $this->position;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function next()
-    {
-        if (++$this->position < $this->size) {
-            $this->current = $this->getValue();
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function valid()
-    {
-        return $this->position < $this->size;
-    }
+    abstract protected function getValue();
 
     /**
      * Returns the number of items comprising the whole multibulk response.
@@ -12425,9 +12341,17 @@ abstract class MultiBulkIterator implements Iterator, Countable, ResponseInterfa
      *
      * @return int
      */
-    public function count()
+    final public function count()
     {
         return $this->size;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function current()
+    {
+        return $this->current;
     }
 
     /**
@@ -12435,7 +12359,7 @@ abstract class MultiBulkIterator implements Iterator, Countable, ResponseInterfa
      *
      * @return int
      */
-    public function getPosition()
+    final public function getPosition()
     {
         return $this->position;
     }
@@ -12443,7 +12367,36 @@ abstract class MultiBulkIterator implements Iterator, Countable, ResponseInterfa
     /**
      * {@inheritdoc}
      */
-    abstract protected function getValue();
+    final public function key()
+    {
+        return $this->position;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function next()
+    {
+        if (++$this->position < $this->size) {
+            $this->current = $this->getValue();
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function rewind()
+    {
+        // NOOP
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    final public function valid()
+    {
+        return $this->position < $this->size;
+    }
 }
 
 /**
@@ -12501,7 +12454,6 @@ class MultiBulk extends MultiBulkIterator
     /**
      * Reads the next item of the multibulk response from the connection.
      *
-     * @return mixed
      */
     protected function getValue()
     {
@@ -12536,12 +12488,28 @@ class MultiBulkTuple extends MultiBulk implements OuterIterator
     }
 
     /**
+     * {@inheritdoc}
+     */
+    public function __destruct()
+    {
+        $this->iterator->drop(true);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getInnerIterator()
+    {
+        return $this->iterator;
+    }
+
+    /**
      * Checks for valid preconditions.
      *
      * @param MultiBulk $iterator Inner multibulk response iterator.
      *
-     * @throws \InvalidArgumentException
-     * @throws \UnexpectedValueException
+     * @throws InvalidArgumentException
+     * @throws UnexpectedValueException
      */
     protected function checkPreconditions(MultiBulk $iterator)
     {
@@ -12554,22 +12522,6 @@ class MultiBulkTuple extends MultiBulk implements OuterIterator
         if (($size = count($iterator)) % 2 !== 0) {
             throw new UnexpectedValueException("Invalid response size for a tuple iterator.");
         }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getInnerIterator()
-    {
-        return $this->iterator;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function __destruct()
-    {
-        $this->iterator->drop(true);
     }
 
     /**
@@ -12659,7 +12611,7 @@ class CRC16 implements HashGeneratorInterface
         // CRC-CCITT-16 algorithm
         $crc = 0;
         $CCITT_16 = self::$CCITT_16;
-        $strlen = strlen($value);
+        $strlen = mb_strlen($value);
 
         for ($i = 0; $i < $strlen; $i++) {
             $crc = (($crc << 8) ^ $CCITT_16[($crc >> 8) ^ ord($value[$i])]) & 0xFFFF;
@@ -12722,31 +12674,13 @@ class ProcessorChain implements ArrayAccess, ProcessorInterface
     }
 
     /**
-     * {@inheritdoc}
+     * Returns the number of command processors in the chain.
+     *
+     * @return int
      */
-    public function remove(ProcessorInterface $processor)
+    public function count()
     {
-        if (false !== $index = array_search($processor, $this->processors, true)) {
-            unset($this[$index]);
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function process(CommandInterface $command)
-    {
-        for ($i = 0; $i < $count = count($this->processors); $i++) {
-            $this->processors[$i]->process($command);
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getProcessors()
-    {
-        return $this->processors;
+        return count($this->processors);
     }
 
     /**
@@ -12760,13 +12694,11 @@ class ProcessorChain implements ArrayAccess, ProcessorInterface
     }
 
     /**
-     * Returns the number of command processors in the chain.
-     *
-     * @return int
+     * {@inheritdoc}
      */
-    public function count()
+    public function getProcessors()
     {
-        return count($this->processors);
+        return $this->processors;
     }
 
     /**
@@ -12808,6 +12740,26 @@ class ProcessorChain implements ArrayAccess, ProcessorInterface
         unset($this->processors[$index]);
         $this->processors = array_values($this->processors);
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function process(CommandInterface $command)
+    {
+        for ($i = 0; $i < $count = count($this->processors); $i++) {
+            $this->processors[$i]->process($command);
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function remove(ProcessorInterface $processor)
+    {
+        if (false !== $index = array_search($processor, $this->processors, true)) {
+            unset($this[$index]);
+        }
+    }
 }
 
 /**
@@ -12818,8 +12770,8 @@ class ProcessorChain implements ArrayAccess, ProcessorInterface
  */
 class KeyPrefixProcessor implements ProcessorInterface
 {
-    private $prefix;
     private $commands;
+    private $prefix;
 
     /**
      * @param string $prefix Prefix for the keys.
@@ -12954,92 +12906,11 @@ class KeyPrefixProcessor implements ProcessorInterface
     }
 
     /**
-     * Sets a prefix that is applied to all the keys.
-     *
-     * @param string $prefix Prefix for the keys.
-     */
-    public function setPrefix($prefix)
-    {
-        $this->prefix = $prefix;
-    }
-
-    /**
-     * Gets the current prefix.
-     *
-     * @return string
-     */
-    public function getPrefix()
-    {
-        return $this->prefix;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function process(CommandInterface $command)
-    {
-        if ($command instanceof PrefixableCommandInterface) {
-            $command->prefixKeys($this->prefix);
-        } elseif (isset($this->commands[$commandID = strtoupper($command->getId())])) {
-            call_user_func($this->commands[$commandID], $command, $this->prefix);
-        }
-    }
-
-    /**
-     * Sets an handler for the specified command ID.
-     *
-     * The callback signature must have 2 parameters of the following types:
-     *
-     *   - Predis\Command\CommandInterface (command instance)
-     *   - String (prefix)
-     *
-     * When the callback argument is omitted or NULL, the previously
-     * associated handler for the specified command ID is removed.
-     *
-     * @param string $commandID The ID of the command to be handled.
-     * @param mixed  $callback  A valid callable object or NULL.
-     *
-     * @throws \InvalidArgumentException
-     */
-    public function setCommandHandler($commandID, $callback = null)
-    {
-        $commandID = strtoupper($commandID);
-
-        if (!isset($callback)) {
-            unset($this->commands[$commandID]);
-
-            return;
-        }
-
-        if (!is_callable($callback)) {
-            throw new InvalidArgumentException(
-                "Callback must be a valid callable object or NULL"
-            );
-        }
-
-        $this->commands[$commandID] = $callback;
-    }
-
-    /**
      * {@inheritdoc}
      */
     public function __toString()
     {
         return $this->getPrefix();
-    }
-
-    /**
-     * Applies the specified prefix only the first argument.
-     *
-     * @param CommandInterface $command Command instance.
-     * @param string           $prefix  Prefix string.
-     */
-    public static function first(CommandInterface $command, $prefix)
-    {
-        if ($arguments = $command->getArguments()) {
-            $arguments[0] = "$prefix{$arguments[0]}";
-            $command->setRawArguments($arguments);
-        }
     }
 
     /**
@@ -13055,6 +12926,37 @@ class KeyPrefixProcessor implements ProcessorInterface
                 $key = "$prefix$key";
             }
 
+            $command->setRawArguments($arguments);
+        }
+    }
+
+    /**
+     * Applies the specified prefix to the keys of an EVAL-based command.
+     *
+     * @param CommandInterface $command Command instance.
+     * @param string           $prefix  Prefix string.
+     */
+    public static function evalKeys(CommandInterface $command, $prefix)
+    {
+        if ($arguments = $command->getArguments()) {
+            for ($i = 2; $i < $arguments[1] + 2; $i++) {
+                $arguments[$i] = "$prefix{$arguments[$i]}";
+            }
+
+            $command->setRawArguments($arguments);
+        }
+    }
+
+    /**
+     * Applies the specified prefix only the first argument.
+     *
+     * @param CommandInterface $command Command instance.
+     * @param string           $prefix  Prefix string.
+     */
+    public static function first(CommandInterface $command, $prefix)
+    {
+        if ($arguments = $command->getArguments()) {
+            $arguments[0] = "$prefix{$arguments[0]}";
             $command->setRawArguments($arguments);
         }
     }
@@ -13154,23 +13056,6 @@ class KeyPrefixProcessor implements ProcessorInterface
     }
 
     /**
-     * Applies the specified prefix to the keys of an EVAL-based command.
-     *
-     * @param CommandInterface $command Command instance.
-     * @param string           $prefix  Prefix string.
-     */
-    public static function evalKeys(CommandInterface $command, $prefix)
-    {
-        if ($arguments = $command->getArguments()) {
-            for ($i = 2; $i < $arguments[1] + 2; $i++) {
-                $arguments[$i] = "$prefix{$arguments[$i]}";
-            }
-
-            $command->setRawArguments($arguments);
-        }
-    }
-
-    /**
      * Applies the specified prefix to the keys of Z[INTERSECTION|UNION]STORE.
      *
      * @param CommandInterface $command Command instance.
@@ -13188,6 +13073,73 @@ class KeyPrefixProcessor implements ProcessorInterface
 
             $command->setRawArguments($arguments);
         }
+    }
+
+    /**
+     * Gets the current prefix.
+     *
+     * @return string
+     */
+    public function getPrefix()
+    {
+        return $this->prefix;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function process(CommandInterface $command)
+    {
+        if ($command instanceof PrefixableCommandInterface) {
+            $command->prefixKeys($this->prefix);
+        } elseif (isset($this->commands[$commandID = mb_strtoupper($command->getId())])) {
+            call_user_func($this->commands[$commandID], $command, $this->prefix);
+        }
+    }
+
+    /**
+     * Sets an handler for the specified command ID.
+     *
+     * The callback signature must have 2 parameters of the following types:
+     *
+     *   - Predis\Command\CommandInterface (command instance)
+     *   - String (prefix)
+     *
+     * When the callback argument is omitted or NULL, the previously
+     * associated handler for the specified command ID is removed.
+     *
+     * @param string $commandID The ID of the command to be handled.
+     * @param mixed  $callback  A valid callable object or NULL.
+     *
+     * @throws InvalidArgumentException
+     */
+    public function setCommandHandler($commandID, $callback = null)
+    {
+        $commandID = mb_strtoupper($commandID);
+
+        if (!isset($callback)) {
+            unset($this->commands[$commandID]);
+
+            return;
+        }
+
+        if (!is_callable($callback)) {
+            throw new InvalidArgumentException(
+                "Callback must be a valid callable object or NULL"
+            );
+        }
+
+        $this->commands[$commandID] = $callback;
+    }
+
+    /**
+     * Sets a prefix that is applied to all the keys.
+     *
+     * @param string $prefix Prefix for the keys.
+     */
+    public function setPrefix($prefix)
+    {
+        $this->prefix = $prefix;
     }
 }
 
@@ -13225,33 +13177,6 @@ class ResponseReader implements ResponseReaderInterface
     }
 
     /**
-     * Returns the default handlers for the supported type of responses.
-     *
-     * @return array
-     */
-    protected function getDefaultHandlers()
-    {
-        return array(
-            '+' => new Handler\StatusResponse(),
-            '-' => new Handler\ErrorResponse(),
-            ':' => new Handler\IntegerResponse(),
-            '$' => new Handler\BulkResponse(),
-            '*' => new Handler\MultiBulkResponse(),
-        );
-    }
-
-    /**
-     * Sets the handler for the specified prefix identifying the response type.
-     *
-     * @param string                           $prefix  Identifier of the type of response.
-     * @param Handler\ResponseHandlerInterface $handler Response handler.
-     */
-    public function setHandler($prefix, Handler\ResponseHandlerInterface $handler)
-    {
-        $this->handlers[$prefix] = $handler;
-    }
-
-    /**
      * Returns the response handler associated to a certain type of response.
      *
      * @param string $prefix Identifier of the type of response.
@@ -13284,9 +13209,36 @@ class ResponseReader implements ResponseReaderInterface
             $this->onProtocolError($connection, "Unknown response prefix: '$prefix'.");
         }
 
-        $payload = $this->handlers[$prefix]->handle($connection, substr($header, 1));
+        $payload = $this->handlers[$prefix]->handle($connection, mb_substr($header, 1));
 
         return $payload;
+    }
+
+    /**
+     * Sets the handler for the specified prefix identifying the response type.
+     *
+     * @param string                           $prefix  Identifier of the type of response.
+     * @param Handler\ResponseHandlerInterface $handler Response handler.
+     */
+    public function setHandler($prefix, Handler\ResponseHandlerInterface $handler)
+    {
+        $this->handlers[$prefix] = $handler;
+    }
+
+    /**
+     * Returns the default handlers for the supported type of responses.
+     *
+     * @return array
+     */
+    protected function getDefaultHandlers()
+    {
+        return array(
+            '+' => new Handler\StatusResponse(),
+            '-' => new Handler\ErrorResponse(),
+            ':' => new Handler\IntegerResponse(),
+            '$' => new Handler\BulkResponse(),
+            '*' => new Handler\MultiBulkResponse(),
+        );
     }
 
     /**
@@ -13320,14 +13272,14 @@ class RequestSerializer implements RequestSerializerInterface
         $commandID = $command->getId();
         $arguments = $command->getArguments();
 
-        $cmdlen = strlen($commandID);
+        $cmdlen = mb_strlen($commandID);
         $reqlen = count($arguments) + 1;
 
         $buffer = "*{$reqlen}\r\n\${$cmdlen}\r\n{$commandID}\r\n";
 
         for ($i = 0, $reqlen--; $i < $reqlen; $i++) {
             $argument = $arguments[$i];
-            $arglen = strlen($argument);
+            $arglen = mb_strlen($argument);
             $buffer .= "\${$arglen}\r\n{$argument}\r\n";
         }
 
@@ -13358,20 +13310,11 @@ class ProtocolProcessor implements ProtocolProcessorInterface
     /**
      * {@inheritdoc}
      */
-    public function write(CompositeConnectionInterface $connection, CommandInterface $command)
-    {
-        $request = $this->serializer->serialize($command);
-        $connection->writeBuffer($request);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
     public function read(CompositeConnectionInterface $connection)
     {
         $chunk = $connection->readLine();
         $prefix = $chunk[0];
-        $payload = substr($chunk, 1);
+        $payload = mb_substr($chunk, 1);
 
         switch ($prefix) {
             case '+':
@@ -13383,7 +13326,7 @@ class ProtocolProcessor implements ProtocolProcessorInterface
                     return null;
                 }
 
-                return substr($connection->readBuffer($size + 2), 0, -2);
+                return mb_substr($connection->readBuffer($size + 2), 0, -2);
 
             case '*':
                 $count = (int) $payload;
@@ -13434,6 +13377,15 @@ class ProtocolProcessor implements ProtocolProcessorInterface
     {
         $this->mbiterable = (bool) $value;
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function write(CompositeConnectionInterface $connection, CommandInterface $command)
+    {
+        $request = $this->serializer->serialize($command);
+        $connection->writeBuffer($request);
+    }
 }
 
 /**
@@ -13446,14 +13398,13 @@ class ProtocolProcessor implements ProtocolProcessorInterface
 class CompositeProtocolProcessor implements ProtocolProcessorInterface
 {
     /*
-     * @var RequestSerializerInterface
-     */
-    protected $serializer;
-
-    /*
      * @var ResponseReaderInterface
      */
     protected $reader;
+    /*
+     * @var RequestSerializerInterface
+     */
+    protected $serializer;
 
     /**
      * @param RequestSerializerInterface $serializer Request serializer.
@@ -13468,11 +13419,23 @@ class CompositeProtocolProcessor implements ProtocolProcessorInterface
     }
 
     /**
-     * {@inheritdoc}
+     * Returns the request serializer used by the protocol processor.
+     *
+     * @return RequestSerializerInterface
      */
-    public function write(CompositeConnectionInterface $connection, CommandInterface $command)
+    public function getRequestSerializer()
     {
-        $connection->writeBuffer($this->serializer->serialize($command));
+        return $this->serializer;
+    }
+
+    /**
+     * Returns the Response reader used by the protocol processor.
+     *
+     * @return ResponseReaderInterface
+     */
+    public function getResponseReader()
+    {
+        return $this->reader;
     }
 
     /**
@@ -13494,16 +13457,6 @@ class CompositeProtocolProcessor implements ProtocolProcessorInterface
     }
 
     /**
-     * Returns the request serializer used by the protocol processor.
-     *
-     * @return RequestSerializerInterface
-     */
-    public function getRequestSerializer()
-    {
-        return $this->serializer;
-    }
-
-    /**
      * Sets the response reader used by the protocol processor.
      *
      * @param ResponseReaderInterface $reader Response reader.
@@ -13514,13 +13467,11 @@ class CompositeProtocolProcessor implements ProtocolProcessorInterface
     }
 
     /**
-     * Returns the Response reader used by the protocol processor.
-     *
-     * @return ResponseReaderInterface
+     * {@inheritdoc}
      */
-    public function getResponseReader()
+    public function write(CompositeConnectionInterface $connection, CommandInterface $command)
     {
-        return $this->reader;
+        $connection->writeBuffer($this->serializer->serialize($command));
     }
 }
 
@@ -13543,17 +13494,17 @@ use InvalidArgumentException;
  */
 abstract class AbstractConsumer implements Iterator
 {
-    public const SUBSCRIBE    = 'subscribe';
-    public const UNSUBSCRIBE  = 'unsubscribe';
-    public const PSUBSCRIBE   = 'psubscribe';
-    public const PUNSUBSCRIBE = 'punsubscribe';
     public const MESSAGE      = 'message';
     public const PMESSAGE     = 'pmessage';
     public const PONG         = 'pong';
+    public const PSUBSCRIBE   = 'psubscribe';
+    public const PUNSUBSCRIBE = 'punsubscribe';
+    public const STATUS_PSUBSCRIBED = 4;	// 0b0100
+    public const STATUS_SUBSCRIBED  = 2;	// 0b0010
 
     public const STATUS_VALID       = 1;	// 0b0001
-    public const STATUS_SUBSCRIBED  = 2;	// 0b0010
-    public const STATUS_PSUBSCRIBED = 4;	// 0b0100
+    public const SUBSCRIBE    = 'subscribe';
+    public const UNSUBSCRIBE  = 'unsubscribe';
 
     private $position = null;
     private $statusFlags = self::STATUS_VALID;
@@ -13567,36 +13518,66 @@ abstract class AbstractConsumer implements Iterator
     }
 
     /**
-     * Checks if the specified flag is valid based on the state of the consumer.
-     *
-     * @param int $value Flag.
-     *
-     * @return bool
+     * Closes the underlying connection when forcing a disconnection.
      */
-    protected function isFlagSet($value)
+    abstract protected function disconnect();
+
+    /**
+     * Waits for a new message from the server generated by one of the active
+     * subscriptions and returns it when available.
+     *
+     * @return array
+     */
+    abstract protected function getValue();
+
+    /**
+     * Writes a Redis command on the underlying connection.
+     *
+     * @param string $method    Command ID.
+     * @param array  $arguments Arguments for the command.
+     */
+    abstract protected function writeRequest($method, $arguments);
+
+    /**
+     * Returns the last message payload retrieved from the server and generated
+     * by one of the active subscriptions.
+     *
+     * @return array
+     */
+    final public function current()
     {
-        return ($this->statusFlags & $value) === $value;
+        return $this->getValue();
     }
 
     /**
-     * Subscribes to the specified channels.
-     *
-     * @param mixed $channel,... One or more channel names.
+     * {@inheritdoc}
      */
-    public function subscribe($channel /*, ... */)
+    final public function key()
     {
-        $this->writeRequest(self::SUBSCRIBE, func_get_args());
-        $this->statusFlags |= self::STATUS_SUBSCRIBED;
+        return $this->position;
     }
 
     /**
-     * Unsubscribes from the specified channels.
-     *
-     * @param string ... One or more channel names.
+     * {@inheritdoc}
      */
-    public function unsubscribe(/* ... */)
+    final public function next()
     {
-        $this->writeRequest(self::UNSUBSCRIBE, func_get_args());
+        if ($this->valid()) {
+            $this->position++;
+        }
+
+        return $this->position;
+    }
+
+    /**
+     * PING the server with an optional payload that will be echoed as a
+     * PONG message in the pub/sub loop.
+     *
+     * @param string $payload Optional PING payload.
+     */
+    final public function ping($payload = null)
+    {
+        $this->writeRequest('PING', array($payload));
     }
 
     /**
@@ -13604,7 +13585,7 @@ abstract class AbstractConsumer implements Iterator
      *
      * @param mixed $pattern,... One or more channel name patterns.
      */
-    public function psubscribe($pattern /* ... */)
+    final public function psubscribe($pattern /* ... */)
     {
         $this->writeRequest(self::PSUBSCRIBE, func_get_args());
         $this->statusFlags |= self::STATUS_PSUBSCRIBED;
@@ -13615,20 +13596,17 @@ abstract class AbstractConsumer implements Iterator
      *
      * @param string ... One or more channel name patterns.
      */
-    public function punsubscribe(/* ... */)
+    final public function punsubscribe(/* ... */)
     {
         $this->writeRequest(self::PUNSUBSCRIBE, func_get_args());
     }
 
     /**
-     * PING the server with an optional payload that will be echoed as a
-     * PONG message in the pub/sub loop.
-     *
-     * @param string $payload Optional PING payload.
+     * {@inheritdoc}
      */
-    public function ping($payload = null)
+    final public function rewind()
     {
-        $this->writeRequest('PING', array($payload));
+        // NOOP
     }
 
     /**
@@ -13639,7 +13617,7 @@ abstract class AbstractConsumer implements Iterator
      *
      * @return bool Returns false when there are no pending messages.
      */
-    public function stop($drop = false)
+    final public function stop($drop = false)
     {
         if (!$this->valid()) {
             return false;
@@ -13661,55 +13639,24 @@ abstract class AbstractConsumer implements Iterator
     }
 
     /**
-     * Closes the underlying connection when forcing a disconnection.
-     */
-    abstract protected function disconnect();
-
-    /**
-     * Writes a Redis command on the underlying connection.
+     * Subscribes to the specified channels.
      *
-     * @param string $method    Command ID.
-     * @param array  $arguments Arguments for the command.
+     * @param mixed $channel,... One or more channel names.
      */
-    abstract protected function writeRequest($method, $arguments);
-
-    /**
-     * {@inheritdoc}
-     */
-    public function rewind()
+    final public function subscribe($channel /*, ... */)
     {
-        // NOOP
+        $this->writeRequest(self::SUBSCRIBE, func_get_args());
+        $this->statusFlags |= self::STATUS_SUBSCRIBED;
     }
 
     /**
-     * Returns the last message payload retrieved from the server and generated
-     * by one of the active subscriptions.
+     * Unsubscribes from the specified channels.
      *
-     * @return array
+     * @param string ... One or more channel names.
      */
-    public function current()
+    final public function unsubscribe(/* ... */)
     {
-        return $this->getValue();
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function key()
-    {
-        return $this->position;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function next()
-    {
-        if ($this->valid()) {
-            $this->position++;
-        }
-
-        return $this->position;
+        $this->writeRequest(self::UNSUBSCRIBE, func_get_args());
     }
 
     /**
@@ -13717,7 +13664,7 @@ abstract class AbstractConsumer implements Iterator
      *
      * @return bool
      */
-    public function valid()
+    final public function valid()
     {
         $isValid = $this->isFlagSet(self::STATUS_VALID);
         $subscriptionFlags = self::STATUS_SUBSCRIBED | self::STATUS_PSUBSCRIBED;
@@ -13735,12 +13682,16 @@ abstract class AbstractConsumer implements Iterator
     }
 
     /**
-     * Waits for a new message from the server generated by one of the active
-     * subscriptions and returns it when available.
+     * Checks if the specified flag is valid based on the state of the consumer.
      *
-     * @return array
+     * @param int $value Flag.
+     *
+     * @return bool
      */
-    abstract protected function getValue();
+    protected function isFlagSet($value)
+    {
+        return ($this->statusFlags & $value) === $value;
+    }
 }
 
 /**
@@ -13751,11 +13702,10 @@ abstract class AbstractConsumer implements Iterator
  */
 class DispatcherLoop
 {
-    private $pubsub;
-
     protected $callbacks;
     protected $defaultCallback;
     protected $subscriptionCallback;
+    private $pubsub;
 
     /**
      * @param Consumer $pubsub PubSub consumer instance used by the loop.
@@ -13764,59 +13714,6 @@ class DispatcherLoop
     {
         $this->callbacks = array();
         $this->pubsub = $pubsub;
-    }
-
-    /**
-     * Checks if the passed argument is a valid callback.
-     *
-     * @param mixed $callable A callback.
-     *
-     * @throws \InvalidArgumentException
-     */
-    protected function assertCallback($callable)
-    {
-        if (!is_callable($callable)) {
-            throw new InvalidArgumentException('The given argument must be a callable object.');
-        }
-    }
-
-    /**
-     * Returns the underlying PUB / SUB context.
-     *
-     * @return Consumer
-     */
-    public function getPubSubConsumer()
-    {
-        return $this->pubsub;
-    }
-
-    /**
-     * Sets a callback that gets invoked upon new subscriptions.
-     *
-     * @param mixed $callable A callback.
-     */
-    public function subscriptionCallback($callable = null)
-    {
-        if (isset($callable)) {
-            $this->assertCallback($callable);
-        }
-
-        $this->subscriptionCallback = $callable;
-    }
-
-    /**
-     * Sets a callback that gets invoked when a message is received on a
-     * channel that does not have an associated callback.
-     *
-     * @param mixed $callable A callback.
-     */
-    public function defaultCallback($callable = null)
-    {
-        if (isset($callable)) {
-            $this->assertCallback($callable);
-        }
-
-        $this->subscriptionCallback = $callable;
     }
 
     /**
@@ -13835,6 +13732,21 @@ class DispatcherLoop
     }
 
     /**
+     * Sets a callback that gets invoked when a message is received on a
+     * channel that does not have an associated callback.
+     *
+     * @param mixed $callable A callback.
+     */
+    public function defaultCallback($callable = null)
+    {
+        if (isset($callable)) {
+            $this->assertCallback($callable);
+        }
+
+        $this->subscriptionCallback = $callable;
+    }
+
+    /**
      * Stops listening to a channel and removes the associated callback.
      *
      * @param string $channel Redis channel.
@@ -13847,6 +13759,16 @@ class DispatcherLoop
             unset($this->callbacks[$callbackName]);
             $this->pubsub->unsubscribe($channel);
         }
+    }
+
+    /**
+     * Returns the underlying PUB / SUB context.
+     *
+     * @return Consumer
+     */
+    public function getPubSubConsumer()
+    {
+        return $this->pubsub;
     }
 
     /**
@@ -13882,6 +13804,34 @@ class DispatcherLoop
     public function stop()
     {
         $this->pubsub->stop();
+    }
+
+    /**
+     * Sets a callback that gets invoked upon new subscriptions.
+     *
+     * @param mixed $callable A callback.
+     */
+    public function subscriptionCallback($callable = null)
+    {
+        if (isset($callable)) {
+            $this->assertCallback($callable);
+        }
+
+        $this->subscriptionCallback = $callable;
+    }
+
+    /**
+     * Checks if the passed argument is a valid callback.
+     *
+     * @param mixed $callable A callback.
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function assertCallback($callable)
+    {
+        if (!is_callable($callable)) {
+            throw new InvalidArgumentException('The given argument must be a callable object.');
+        }
     }
 
     /**
@@ -13934,56 +13884,6 @@ class Consumer extends AbstractConsumer
     public function getClient()
     {
         return $this->client;
-    }
-
-    /**
-     * Checks if the client instance satisfies the required conditions needed to
-     * initialize a PUB/SUB consumer.
-     *
-     * @param ClientInterface $client Client instance used by the consumer.
-     *
-     * @throws NotSupportedException
-     */
-    private function checkCapabilities(ClientInterface $client)
-    {
-        if ($client->getConnection() instanceof AggregateConnectionInterface) {
-            throw new NotSupportedException(
-                'Cannot initialize a PUB/SUB consumer over aggregate connections.'
-            );
-        }
-
-        $commands = array('publish', 'subscribe', 'unsubscribe', 'psubscribe', 'punsubscribe');
-
-        if ($client->getProfile()->supportsCommands($commands) === false) {
-            throw new NotSupportedException(
-                'The current profile does not support PUB/SUB related commands.'
-            );
-        }
-    }
-
-    /**
-     * This method shares the logic to handle both SUBSCRIBE and PSUBSCRIBE.
-     *
-     * @param string $subscribeAction Type of subscription.
-     */
-    private function genericSubscribeInit($subscribeAction)
-    {
-        if (isset($this->options[$subscribeAction])) {
-            $this->$subscribeAction($this->options[$subscribeAction]);
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function writeRequest($method, $arguments)
-    {
-        $this->client->getConnection()->writeRequest(
-            $this->client->createCommand(
-                $method,
-                Command::normalizeArguments($arguments)
-            )
-        );
     }
 
     /**
@@ -14040,6 +13940,56 @@ class Consumer extends AbstractConsumer
                 );
         }
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function writeRequest($method, $arguments)
+    {
+        $this->client->getConnection()->writeRequest(
+            $this->client->createCommand(
+                $method,
+                Command::normalizeArguments($arguments)
+            )
+        );
+    }
+
+    /**
+     * Checks if the client instance satisfies the required conditions needed to
+     * initialize a PUB/SUB consumer.
+     *
+     * @param ClientInterface $client Client instance used by the consumer.
+     *
+     * @throws NotSupportedException
+     */
+    private function checkCapabilities(ClientInterface $client)
+    {
+        if ($client->getConnection() instanceof AggregateConnectionInterface) {
+            throw new NotSupportedException(
+                'Cannot initialize a PUB/SUB consumer over aggregate connections.'
+            );
+        }
+
+        $commands = array('publish', 'subscribe', 'unsubscribe', 'psubscribe', 'punsubscribe');
+
+        if ($client->getProfile()->supportsCommands($commands) === false) {
+            throw new NotSupportedException(
+                'The current profile does not support PUB/SUB related commands.'
+            );
+        }
+    }
+
+    /**
+     * This method shares the logic to handle both SUBSCRIBE and PSUBSCRIBE.
+     *
+     * @param string $subscribeAction Type of subscription.
+     */
+    private function genericSubscribeInit($subscribeAction)
+    {
+        if (isset($this->options[$subscribeAction])) {
+            $this->$subscribeAction($this->options[$subscribeAction]);
+        }
+    }
 }
 
 /* --------------------------------------------------------------------------- */
@@ -14069,10 +14019,10 @@ use Predis\Protocol\ProtocolException;
  */
 class MultiExecState
 {
+    public const CAS         = 8;    // 0b01000
+    public const DISCARDED   = 4;    // 0b00100
     public const INITIALIZED = 1;    // 0b00001
     public const INSIDEBLOCK = 2;    // 0b00010
-    public const DISCARDED   = 4;    // 0b00100
-    public const CAS         = 8;    // 0b01000
     public const WATCH       = 16;   // 0b10000
 
     private $flags;
@@ -14083,46 +14033,6 @@ class MultiExecState
     public function __construct()
     {
         $this->flags = 0;
-    }
-
-    /**
-     * Sets the internal state flags.
-     *
-     * @param int $flags Set of flags
-     */
-    public function set($flags)
-    {
-        $this->flags = $flags;
-    }
-
-    /**
-     * Gets the internal state flags.
-     *
-     * @return int
-     */
-    public function get()
-    {
-        return $this->flags;
-    }
-
-    /**
-     * Sets one or more flags.
-     *
-     * @param int $flags Set of flags
-     */
-    public function flag($flags)
-    {
-        $this->flags |= $flags;
-    }
-
-    /**
-     * Resets one or more flags.
-     *
-     * @param int $flags Set of flags
-     */
-    public function unflag($flags)
-    {
-        $this->flags &= ~$flags;
     }
 
     /**
@@ -14138,31 +14048,43 @@ class MultiExecState
     }
 
     /**
-     * Resets the state of a transaction.
+     * Sets one or more flags.
+     *
+     * @param int $flags Set of flags
      */
-    public function reset()
+    public function flag($flags)
     {
-        $this->flags = 0;
+        $this->flags |= $flags;
     }
 
     /**
-     * Returns the state of the RESET flag.
+     * Gets the internal state flags.
      *
-     * @return bool
+     * @return int
      */
-    public function isReset()
+    public function get()
     {
-        return $this->flags === 0;
+        return $this->flags;
     }
 
     /**
-     * Returns the state of the INITIALIZED flag.
+     * Returns the state of the CAS flag.
      *
      * @return bool
      */
-    public function isInitialized()
+    public function isCAS()
     {
-        return $this->check(self::INITIALIZED);
+        return $this->check(self::CAS);
+    }
+
+    /**
+     * Returns the state of the DISCARDED flag.
+     *
+     * @return bool
+     */
+    public function isDiscarded()
+    {
+        return $this->check(self::DISCARDED);
     }
 
     /**
@@ -14176,13 +14098,23 @@ class MultiExecState
     }
 
     /**
-     * Returns the state of the CAS flag.
+     * Returns the state of the INITIALIZED flag.
      *
      * @return bool
      */
-    public function isCAS()
+    public function isInitialized()
     {
-        return $this->check(self::CAS);
+        return $this->check(self::INITIALIZED);
+    }
+
+    /**
+     * Returns the state of the RESET flag.
+     *
+     * @return bool
+     */
+    public function isReset()
+    {
+        return $this->flags === 0;
     }
 
     /**
@@ -14206,13 +14138,31 @@ class MultiExecState
     }
 
     /**
-     * Returns the state of the DISCARDED flag.
-     *
-     * @return bool
+     * Resets the state of a transaction.
      */
-    public function isDiscarded()
+    public function reset()
     {
-        return $this->check(self::DISCARDED);
+        $this->flags = 0;
+    }
+
+    /**
+     * Sets the internal state flags.
+     *
+     * @param int $flags Set of flags
+     */
+    public function set($flags)
+    {
+        $this->flags = $flags;
+    }
+
+    /**
+     * Resets one or more flags.
+     *
+     * @param int $flags Set of flags
+     */
+    public function unflag($flags)
+    {
+        $this->flags &= ~$flags;
     }
 }
 
@@ -14225,14 +14175,14 @@ class MultiExecState
  */
 class MultiExec implements ClientContextInterface
 {
-    private $state;
+    protected $attempts   = 0;
 
     protected $client;
     protected $commands;
     protected $exceptions = true;
-    protected $attempts   = 0;
-    protected $watchKeys  = array();
     protected $modeCAS    = false;
+    protected $watchKeys  = array();
+    private $state;
 
     /**
      * @param ClientInterface $client  Client instance used by the transaction.
@@ -14250,226 +14200,17 @@ class MultiExec implements ClientContextInterface
     }
 
     /**
-     * Checks if the passed client instance satisfies the required conditions
-     * needed to initialize the transaction object.
-     *
-     * @param ClientInterface $client Client instance used by the transaction object.
-     *
-     * @throws NotSupportedException
-     */
-    private function assertClient(ClientInterface $client)
-    {
-        if ($client->getConnection() instanceof AggregateConnectionInterface) {
-            throw new NotSupportedException(
-                'Cannot initialize a MULTI/EXEC transaction over aggregate connections.'
-            );
-        }
-
-        if (!$client->getProfile()->supportsCommands(array('MULTI', 'EXEC', 'DISCARD'))) {
-            throw new NotSupportedException(
-                'The current profile does not support MULTI, EXEC and DISCARD.'
-            );
-        }
-    }
-
-    /**
-     * Configures the transaction using the provided options.
-     *
-     * @param ClientInterface $client  Underlying client instance.
-     * @param array           $options Array of options for the transaction.
-     **/
-    protected function configure(ClientInterface $client, array $options)
-    {
-        if (isset($options['exceptions'])) {
-            $this->exceptions = (bool) $options['exceptions'];
-        } else {
-            $this->exceptions = $client->getOptions()->exceptions;
-        }
-
-        if (isset($options['cas'])) {
-            $this->modeCAS = (bool) $options['cas'];
-        }
-
-        if (isset($options['watch']) && $keys = $options['watch']) {
-            $this->watchKeys = $keys;
-        }
-
-        if (isset($options['retry'])) {
-            $this->attempts = (int) $options['retry'];
-        }
-    }
-
-    /**
-     * Resets the state of the transaction.
-     */
-    protected function reset()
-    {
-        $this->state->reset();
-        $this->commands = new SplQueue();
-    }
-
-    /**
-     * Initializes the transaction context.
-     */
-    protected function initialize()
-    {
-        if ($this->state->isInitialized()) {
-            return;
-        }
-
-        if ($this->modeCAS) {
-            $this->state->flag(MultiExecState::CAS);
-        }
-
-        if ($this->watchKeys) {
-            $this->watch($this->watchKeys);
-        }
-
-        $cas = $this->state->isCAS();
-        $discarded = $this->state->isDiscarded();
-
-        if (!$cas || ($cas && $discarded)) {
-            $this->call('MULTI');
-
-            if ($discarded) {
-                $this->state->unflag(MultiExecState::CAS);
-            }
-        }
-
-        $this->state->unflag(MultiExecState::DISCARDED);
-        $this->state->flag(MultiExecState::INITIALIZED);
-    }
-
-    /**
      * Dynamically invokes a Redis command with the specified arguments.
      *
      * @param string $method    Command ID.
      * @param array  $arguments Arguments for the command.
      *
-     * @return mixed
      */
     public function __call($method, $arguments)
     {
         return $this->executeCommand(
             $this->client->createCommand($method, $arguments)
         );
-    }
-
-    /**
-     * Executes a Redis command bypassing the transaction logic.
-     *
-     * @param string $commandID Command ID.
-     * @param array  $arguments Arguments for the command.
-     *
-     * @return mixed
-     *
-     * @throws ServerException
-     */
-    protected function call($commandID, array $arguments = array())
-    {
-        $response = $this->client->executeCommand(
-            $this->client->createCommand($commandID, $arguments)
-        );
-
-        if ($response instanceof ErrorResponseInterface) {
-            throw new ServerException($response->getMessage());
-        }
-
-        return $response;
-    }
-
-    /**
-     * Executes the specified Redis command.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return $this|mixed
-     *
-     * @throws AbortedMultiExecException
-     * @throws CommunicationException
-     */
-    public function executeCommand(CommandInterface $command)
-    {
-        $this->initialize();
-        if ($this->state->isCAS()) {
-            return $this->client->executeCommand($command);
-        }
-
-        $response = $this->client->getConnection()->executeCommand($command);
-
-        if ($response instanceof StatusResponse && $response == 'QUEUED') {
-            $this->commands->enqueue($command);
-        } elseif ($response instanceof ErrorResponseInterface) {
-            throw new AbortedMultiExecException($this, $response->getMessage());
-        } else {
-            $this->onProtocolError('The server did not return a +QUEUED status response.');
-        }
-
-        return $this;
-    }
-
-    /**
-     * Executes WATCH against one or more keys.
-     *
-     * @param string|array $keys One or more keys.
-     *
-     * @return mixed
-     *
-     * @throws NotSupportedException
-     * @throws ClientException
-     */
-    public function watch($keys)
-    {
-        if (!$this->client->getProfile()->supportsCommand('WATCH')) {
-            throw new NotSupportedException('WATCH is not supported by the current profile.');
-        }
-
-        if ($this->state->isWatchAllowed()) {
-            throw new ClientException('Sending WATCH after MULTI is not allowed.');
-        }
-
-        $response = $this->call('WATCH', is_array($keys) ? $keys : array($keys));
-        $this->state->flag(MultiExecState::WATCH);
-
-        return $response;
-    }
-
-    /**
-     * Finalizes the transaction by executing MULTI on the server.
-     *
-     * @return MultiExec
-     */
-    public function multi()
-    {
-        if ($this->state->check(MultiExecState::INITIALIZED | MultiExecState::CAS)) {
-            $this->state->unflag(MultiExecState::CAS);
-            $this->call('MULTI');
-        } else {
-            $this->initialize();
-        }
-
-        return $this;
-    }
-
-    /**
-     * Executes UNWATCH.
-     *
-     * @return MultiExec
-     *
-     * @throws NotSupportedException
-     */
-    public function unwatch()
-    {
-        if (!$this->client->getProfile()->supportsCommand('UNWATCH')) {
-            throw new NotSupportedException(
-                'UNWATCH is not supported by the current profile.'
-            );
-        }
-
-        $this->state->unflag(MultiExecState::WATCH);
-        $this->__call('UNWATCH', array());
-
-        return $this;
     }
 
     /**
@@ -14493,48 +14234,10 @@ class MultiExec implements ClientContextInterface
     /**
      * Executes the whole transaction.
      *
-     * @return mixed
      */
     public function exec()
     {
         return $this->execute();
-    }
-
-    /**
-     * Checks the state of the transaction before execution.
-     *
-     * @param mixed $callable Callback for execution.
-     *
-     * @throws InvalidArgumentException
-     * @throws ClientException
-     */
-    private function checkBeforeExecution($callable)
-    {
-        if ($this->state->isExecuting()) {
-            throw new ClientException(
-                'Cannot invoke "execute" or "exec" inside an active transaction context.'
-            );
-        }
-
-        if ($callable) {
-            if (!is_callable($callable)) {
-                throw new InvalidArgumentException('The argument must be a callable object.');
-            }
-
-            if (!$this->commands->isEmpty()) {
-                $this->discard();
-
-                throw new ClientException(
-                    'Cannot execute a transaction block after using fluent interface.'
-                );
-            }
-        } elseif ($this->attempts) {
-            $this->discard();
-
-            throw new ClientException(
-                'Automatic retries are supported only when a callable block is provided.'
-            );
-        }
     }
 
     /**
@@ -14608,6 +14311,148 @@ class MultiExec implements ClientContextInterface
     }
 
     /**
+     * Executes the specified Redis command.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     * @return $this|mixed
+     *
+     * @throws AbortedMultiExecException
+     * @throws CommunicationException
+     */
+    public function executeCommand(CommandInterface $command)
+    {
+        $this->initialize();
+        if ($this->state->isCAS()) {
+            return $this->client->executeCommand($command);
+        }
+
+        $response = $this->client->getConnection()->executeCommand($command);
+
+        if ($response instanceof StatusResponse && $response === 'QUEUED') {
+            $this->commands->enqueue($command);
+        } elseif ($response instanceof ErrorResponseInterface) {
+            throw new AbortedMultiExecException($this, $response->getMessage());
+        } else {
+            $this->onProtocolError('The server did not return a +QUEUED status response.');
+        }
+
+        return $this;
+    }
+
+    /**
+     * Finalizes the transaction by executing MULTI on the server.
+     *
+     * @return MultiExec
+     */
+    public function multi()
+    {
+        if ($this->state->check(MultiExecState::INITIALIZED | MultiExecState::CAS)) {
+            $this->state->unflag(MultiExecState::CAS);
+            $this->call('MULTI');
+        } else {
+            $this->initialize();
+        }
+
+        return $this;
+    }
+
+    /**
+     * Executes UNWATCH.
+     *
+     * @return MultiExec
+     *
+     * @throws NotSupportedException
+     */
+    public function unwatch()
+    {
+        if (!$this->client->getProfile()->supportsCommand('UNWATCH')) {
+            throw new NotSupportedException(
+                'UNWATCH is not supported by the current profile.'
+            );
+        }
+
+        $this->state->unflag(MultiExecState::WATCH);
+        $this->__call('UNWATCH', array());
+
+        return $this;
+    }
+
+    /**
+     * Executes WATCH against one or more keys.
+     *
+     * @param string|array $keys One or more keys.
+     *
+     *
+     * @throws NotSupportedException
+     * @throws ClientException
+     */
+    public function watch($keys)
+    {
+        if (!$this->client->getProfile()->supportsCommand('WATCH')) {
+            throw new NotSupportedException('WATCH is not supported by the current profile.');
+        }
+
+        if ($this->state->isWatchAllowed()) {
+            throw new ClientException('Sending WATCH after MULTI is not allowed.');
+        }
+
+        $response = $this->call('WATCH', is_array($keys) ? $keys : array($keys));
+        $this->state->flag(MultiExecState::WATCH);
+
+        return $response;
+    }
+
+    /**
+     * Executes a Redis command bypassing the transaction logic.
+     *
+     * @param string $commandID Command ID.
+     * @param array  $arguments Arguments for the command.
+     *
+     *
+     * @throws ServerException
+     */
+    protected function call($commandID, array $arguments = array())
+    {
+        $response = $this->client->executeCommand(
+            $this->client->createCommand($commandID, $arguments)
+        );
+
+        if ($response instanceof ErrorResponseInterface) {
+            throw new ServerException($response->getMessage());
+        }
+
+        return $response;
+    }
+
+    /**
+     * Configures the transaction using the provided options.
+     *
+     * @param ClientInterface $client  Underlying client instance.
+     * @param array           $options Array of options for the transaction.
+     **/
+    protected function configure(ClientInterface $client, array $options)
+    {
+        if (isset($options['exceptions'])) {
+            $this->exceptions = (bool) $options['exceptions'];
+        } else {
+            $this->exceptions = $client->getOptions()->exceptions;
+        }
+
+        if (isset($options['cas'])) {
+            $this->modeCAS = (bool) $options['cas'];
+        }
+
+        if (isset($options['watch']) && $keys = $options['watch']) {
+            $this->watchKeys = $keys;
+        }
+
+        if (isset($options['retry'])) {
+            $this->attempts = (int) $options['retry'];
+        }
+    }
+
+    /**
      * Passes the current transaction object to a callable block for execution.
      *
      * @param mixed $callable Callback.
@@ -14634,6 +14479,107 @@ class MultiExec implements ClientContextInterface
 
         if ($exception) {
             throw $exception;
+        }
+    }
+
+    /**
+     * Initializes the transaction context.
+     */
+    protected function initialize()
+    {
+        if ($this->state->isInitialized()) {
+            return;
+        }
+
+        if ($this->modeCAS) {
+            $this->state->flag(MultiExecState::CAS);
+        }
+
+        if ($this->watchKeys) {
+            $this->watch($this->watchKeys);
+        }
+
+        $cas = $this->state->isCAS();
+        $discarded = $this->state->isDiscarded();
+
+        if (!$cas || ($cas && $discarded)) {
+            $this->call('MULTI');
+
+            if ($discarded) {
+                $this->state->unflag(MultiExecState::CAS);
+            }
+        }
+
+        $this->state->unflag(MultiExecState::DISCARDED);
+        $this->state->flag(MultiExecState::INITIALIZED);
+    }
+
+    /**
+     * Resets the state of the transaction.
+     */
+    protected function reset()
+    {
+        $this->state->reset();
+        $this->commands = new SplQueue();
+    }
+
+    /**
+     * Checks if the passed client instance satisfies the required conditions
+     * needed to initialize the transaction object.
+     *
+     * @param ClientInterface $client Client instance used by the transaction object.
+     *
+     * @throws NotSupportedException
+     */
+    private function assertClient(ClientInterface $client)
+    {
+        if ($client->getConnection() instanceof AggregateConnectionInterface) {
+            throw new NotSupportedException(
+                'Cannot initialize a MULTI/EXEC transaction over aggregate connections.'
+            );
+        }
+
+        if (!$client->getProfile()->supportsCommands(array('MULTI', 'EXEC', 'DISCARD'))) {
+            throw new NotSupportedException(
+                'The current profile does not support MULTI, EXEC and DISCARD.'
+            );
+        }
+    }
+
+    /**
+     * Checks the state of the transaction before execution.
+     *
+     * @param mixed $callable Callback for execution.
+     *
+     * @throws InvalidArgumentException
+     * @throws ClientException
+     */
+    private function checkBeforeExecution($callable)
+    {
+        if ($this->state->isExecuting()) {
+            throw new ClientException(
+                'Cannot invoke "execute" or "exec" inside an active transaction context.'
+            );
+        }
+
+        if ($callable) {
+            if (!is_callable($callable)) {
+                throw new InvalidArgumentException('The argument must be a callable object.');
+            }
+
+            if (!$this->commands->isEmpty()) {
+                $this->discard();
+
+                throw new ClientException(
+                    'Cannot execute a transaction block after using fluent interface.'
+                );
+            }
+        } elseif ($this->attempts) {
+            $this->discard();
+
+            throw new ClientException(
+                'Automatic retries are supported only when a callable block is provided.'
+            );
         }
     }
 
@@ -14723,34 +14669,6 @@ class Handler implements SessionHandlerInterface
     }
 
     /**
-     * Registers this instance as the current session handler.
-     */
-    public function register()
-    {
-        if (version_compare(PHP_VERSION, '5.4.0') >= 0) {
-            session_set_save_handler($this, true);
-        } else {
-            session_set_save_handler(
-                array($this, 'open'),
-                array($this, 'close'),
-                array($this, 'read'),
-                array($this, 'write'),
-                array($this, 'destroy'),
-                array($this, 'gc')
-            );
-        }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function open($save_path, $session_id)
-    {
-        // NOOP
-        return true;
-    }
-
-    /**
      * {@inheritdoc}
      */
     public function close()
@@ -14762,40 +14680,19 @@ class Handler implements SessionHandlerInterface
     /**
      * {@inheritdoc}
      */
-    public function gc($maxlifetime)
-    {
-        // NOOP
-        return true;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function read($session_id)
-    {
-        if ($data = $this->client->get($session_id)) {
-            return $data;
-        }
-
-        return '';
-    }
-    /**
-     * {@inheritdoc}
-     */
-    public function write($session_id, $session_data)
-    {
-        $this->client->setex($session_id, $this->ttl, $session_data);
-
-        return true;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
     public function destroy($session_id)
     {
         $this->client->del($session_id);
 
+        return true;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function gc($maxlifetime)
+    {
+        // NOOP
         return true;
     }
 
@@ -14818,6 +14715,55 @@ class Handler implements SessionHandlerInterface
     {
         return $this->ttl;
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function open($save_path, $session_id)
+    {
+        // NOOP
+        return true;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function read($session_id)
+    {
+        if ($data = $this->client->get($session_id)) {
+            return $data;
+        }
+
+        return '';
+    }
+
+    /**
+     * Registers this instance as the current session handler.
+     */
+    public function register()
+    {
+        if (version_compare(PHP_VERSION, '5.4.0') >= 0) {
+            session_set_save_handler($this, true);
+        } else {
+            session_set_save_handler(
+                array($this, 'open'),
+                array($this, 'close'),
+                array($this, 'read'),
+                array($this, 'write'),
+                array($this, 'destroy'),
+                array($this, 'gc')
+            );
+        }
+    }
+    /**
+     * {@inheritdoc}
+     */
+    public function write($session_id, $session_data)
+    {
+        $this->client->setex($session_id, $this->ttl, $session_data);
+
+        return true;
+    }
 }
 
 /* --------------------------------------------------------------------------- */
@@ -14837,8 +14783,8 @@ use Predis\Connection\AggregateConnectionInterface;
 class Consumer implements Iterator
 {
     private $client;
-    private $valid;
     private $position;
+    private $valid;
 
     /**
      * @param ClientInterface $client Client instance used by the consumer.
@@ -14858,56 +14804,6 @@ class Consumer implements Iterator
     public function __destruct()
     {
         $this->stop();
-    }
-
-    /**
-     * Checks if the passed client instance satisfies the required conditions
-     * needed to initialize a monitor consumer.
-     *
-     * @param ClientInterface $client Client instance used by the consumer.
-     *
-     * @throws NotSupportedException
-     */
-    private function assertClient(ClientInterface $client)
-    {
-        if ($client->getConnection() instanceof AggregateConnectionInterface) {
-            throw new NotSupportedException(
-                'Cannot initialize a monitor consumer over aggregate connections.'
-            );
-        }
-
-        if ($client->getProfile()->supportsCommand('MONITOR') === false) {
-            throw new NotSupportedException("The current profile does not support 'MONITOR'.");
-        }
-    }
-
-    /**
-     * Initializes the consumer and sends the MONITOR command to the server.
-     */
-    protected function start()
-    {
-        $this->client->executeCommand(
-            $this->client->createCommand('MONITOR')
-        );
-        $this->valid = true;
-    }
-
-    /**
-     * Stops the consumer. Internally this is done by disconnecting from server
-     * since there is no way to terminate the stream initialized by MONITOR.
-     */
-    public function stop()
-    {
-        $this->client->disconnect();
-        $this->valid = false;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function rewind()
-    {
-        // NOOP
     }
 
     /**
@@ -14937,6 +14833,24 @@ class Consumer implements Iterator
     }
 
     /**
+     * {@inheritdoc}
+     */
+    public function rewind()
+    {
+        // NOOP
+    }
+
+    /**
+     * Stops the consumer. Internally this is done by disconnecting from server
+     * since there is no way to terminate the stream initialized by MONITOR.
+     */
+    public function stop()
+    {
+        $this->client->disconnect();
+        $this->valid = false;
+    }
+
+    /**
      * Checks if the the consumer is still in a valid state to continue.
      *
      * @return bool
@@ -14944,6 +14858,38 @@ class Consumer implements Iterator
     public function valid()
     {
         return $this->valid;
+    }
+
+    /**
+     * Initializes the consumer and sends the MONITOR command to the server.
+     */
+    protected function start()
+    {
+        $this->client->executeCommand(
+            $this->client->createCommand('MONITOR')
+        );
+        $this->valid = true;
+    }
+
+    /**
+     * Checks if the passed client instance satisfies the required conditions
+     * needed to initialize a monitor consumer.
+     *
+     * @param ClientInterface $client Client instance used by the consumer.
+     *
+     * @throws NotSupportedException
+     */
+    private function assertClient(ClientInterface $client)
+    {
+        if ($client->getConnection() instanceof AggregateConnectionInterface) {
+            throw new NotSupportedException(
+                'Cannot initialize a monitor consumer over aggregate connections.'
+            );
+        }
+
+        if ($client->getProfile()->supportsCommand('MONITOR') === false) {
+            throw new NotSupportedException("The current profile does not support 'MONITOR'.");
+        }
     }
 
     /**
@@ -14980,7 +14926,7 @@ class Consumer implements Iterator
             'timestamp' => (float) $timestamp,
             'database'  => $database,
             'client'    => $client,
-            'command'   => substr($command, 1, -1),
+            'command'   => mb_substr($command, 1, -1),
             'arguments' => $arguments,
         );
     }
@@ -15012,6 +14958,19 @@ class ReplicationStrategy
         $this->disallowed = $this->getDisallowedOperations();
         $this->readonly = $this->getReadOnlyOperations();
         $this->readonlySHA1 = array();
+    }
+
+    /**
+     * Returns if the specified command is not allowed for execution in a master
+     * / slave replication context.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     * @return bool
+     */
+    public function isDisallowedOperation(CommandInterface $command)
+    {
+        return isset($this->disallowed[$command->getId()]);
     }
 
     /**
@@ -15056,34 +15015,6 @@ class ReplicationStrategy
     }
 
     /**
-     * Returns if the specified command is not allowed for execution in a master
-     * / slave replication context.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return bool
-     */
-    public function isDisallowedOperation(CommandInterface $command)
-    {
-        return isset($this->disallowed[$command->getId()]);
-    }
-
-    /**
-     * Checks if a SORT command is a readable operation by parsing the arguments
-     * array of the specified commad instance.
-     *
-     * @param CommandInterface $command Command instance.
-     *
-     * @return bool
-     */
-    protected function isSortReadOnly(CommandInterface $command)
-    {
-        $arguments = $command->getArguments();
-
-        return ($c = count($arguments)) === 1 ? true : $arguments[$c - 2] !== 'STORE';
-    }
-
-    /**
      * Marks a command as a read-only operation.
      *
      * When the behavior of a command can be decided only at runtime depending
@@ -15095,7 +15026,7 @@ class ReplicationStrategy
      */
     public function setCommandReadOnly($commandID, $readonly = true)
     {
-        $commandID = strtoupper($commandID);
+        $commandID = mb_strtoupper($commandID);
 
         if ($readonly) {
             $this->readonly[$commandID] = $readonly;
@@ -15209,6 +15140,21 @@ class ReplicationStrategy
             'PFCOUNT'           => true,
             'SORT'              => array($this, 'isSortReadOnly'),
         );
+    }
+
+    /**
+     * Checks if a SORT command is a readable operation by parsing the arguments
+     * array of the specified commad instance.
+     *
+     * @param CommandInterface $command Command instance.
+     *
+     * @return bool
+     */
+    protected function isSortReadOnly(CommandInterface $command)
+    {
+        $arguments = $command->getArguments();
+
+        return ($c = count($arguments)) === 1 ? true : $arguments[$c - 2] !== 'STORE';
     }
 }
 
