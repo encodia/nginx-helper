@@ -195,6 +195,7 @@ abstract class Purger {
 
 		}
 
+		$this->_purge_extra_urls( $post_id );
 		$this->custom_purge_urls();
 
 		$this->log( 'Function purge_post END ^^^' );
@@ -712,6 +713,42 @@ abstract class Purger {
 		$this->purge_url( $homepage_url );
 
 		return true;
+
+	}
+
+	/**
+	 * Purge extra URLs registered via the rt_nginx_helper_purge_urls filter.
+	 *
+	 * Allows third-party code to declare additional URLs to purge for a given
+	 * post (e.g. alternate representations like .md, .amp, .json).
+	 *
+	 * @param int $post_id Post id.
+	 *
+	 * @return void
+	 */
+	private function _purge_extra_urls( $post_id ) {
+
+		$extra_urls = apply_filters( 'rt_nginx_helper_purge_urls', array(), $post_id );
+
+		if ( empty( $extra_urls ) || ! is_array( $extra_urls ) ) {
+			return;
+		}
+
+		$extra_urls = array_filter( array_unique( $extra_urls ), 'is_string' );
+
+		foreach ( $extra_urls as $url ) {
+
+			$this->log(
+				sprintf(
+					/* translators: %s extra URL to purge */
+					__( 'Purging extra URL %s', 'nginx-helper' ),
+					$url
+				)
+			);
+
+			$this->purge_url( $url );
+
+		}
 
 	}
 
