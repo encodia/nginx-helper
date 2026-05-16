@@ -1,0 +1,28 @@
+{
+  "name": "nginx-helper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "license": "AGPL-version-3.0",
+  "private": false,
+  "engines": {
+    "node": ">= 14.0.0",
+    "npm": ">= 6.0.0"
+  },
+  "keywords": [],
+  "author": {
+    "name": "Encodia",
+    "email": "info@encodia.it",
+    "url": "https://www.encodia.it"
+  },
+  "contributors": [],
+  "scripts": {
+    "test": ""
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
+    "husky": "^9.1.7"
+  }
+}

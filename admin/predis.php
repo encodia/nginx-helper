@@ -1,4 +1,6 @@
-<?php // phpcs:disable
+<?php
+
+// phpcs:disable
 
 /*
  * This file is part of the Predis package.
@@ -4047,7 +4049,9 @@ abstract class AbstractConnection implements NodeConnectionInterface
     {
         CommunicationException::handle(
             new ConnectionException(
-                $this, "$message [{$this->parameters->scheme}://{$this->getIdentifier()}]", $code
+                $this,
+                "$message [{$this->parameters->scheme}://{$this->getIdentifier()}]",
+                $code
             )
         );
     }
@@ -4061,7 +4065,8 @@ abstract class AbstractConnection implements NodeConnectionInterface
     {
         CommunicationException::handle(
             new ProtocolException(
-                $this, "$message [{$this->parameters->scheme}://{$this->getIdentifier()}]"
+                $this,
+                "$message [{$this->parameters->scheme}://{$this->getIdentifier()}]"
             )
         );
     }
@@ -7562,7 +7567,6 @@ abstract class PredisException extends Exception
  */
 interface ClientContextInterface
 {
-
     /**
      * Sends the specified command instance to Redis.
      *
@@ -7903,7 +7907,7 @@ class ClientException extends PredisException
  */
 class Client implements ClientInterface
 {
-    const VERSION = '1.0.1';
+    public const VERSION = '1.0.1';
 
     protected $connection;
     protected $options;
@@ -8413,7 +8417,7 @@ class Autoloader
      */
     public static function register($prepend = false)
     {
-        spl_autoload_register(array(new self, 'autoload'), true, $prepend);
+        spl_autoload_register(array(new self(), 'autoload'), true, $prepend);
     }
 
     /**
@@ -9146,7 +9150,8 @@ class StreamableMultiBulkResponse implements ResponseHandlerInterface
 
         if ("$length" != $payload) {
             CommunicationException::handle(new ProtocolException(
-                $connection, "Cannot parse '$payload' as a valid length for a multi-bulk response."
+                $connection,
+                "Cannot parse '$payload' as a valid length for a multi-bulk response."
             ));
         }
 
@@ -9172,7 +9177,8 @@ class MultiBulkResponse implements ResponseHandlerInterface
 
         if ("$length" !== $payload) {
             CommunicationException::handle(new ProtocolException(
-                $connection, "Cannot parse '$payload' as a valid length of a multi-bulk response."
+                $connection,
+                "Cannot parse '$payload' as a valid length of a multi-bulk response."
             ));
         }
 
@@ -9243,7 +9249,8 @@ class IntegerResponse implements ResponseHandlerInterface
 
         if ($payload !== 'nil') {
             CommunicationException::handle(new ProtocolException(
-                $connection, "Cannot parse '$payload' as a valid numeric response."
+                $connection,
+                "Cannot parse '$payload' as a valid numeric response."
             ));
         }
 
@@ -9269,7 +9276,8 @@ class BulkResponse implements ResponseHandlerInterface
 
         if ("$length" !== $payload) {
             CommunicationException::handle(new ProtocolException(
-                $connection, "Cannot parse '$payload' as a valid length for a bulk response."
+                $connection,
+                "Cannot parse '$payload' as a valid length for a bulk response."
             ));
         }
 
@@ -9282,7 +9290,8 @@ class BulkResponse implements ResponseHandlerInterface
         }
 
         CommunicationException::handle(new ProtocolException(
-            $connection, "Value '$payload' is not a valid length for a bulk response."
+            $connection,
+            "Value '$payload' is not a valid length for a bulk response."
         ));
 
         return;
@@ -9401,7 +9410,7 @@ abstract class CursorBasedIterator implements Iterator
      */
     protected function fetch()
     {
-		list($cursor, $elements) = $this->executeCommand();
+        list($cursor, $elements) = $this->executeCommand();
 
         if (!$cursor) {
             $this->fetchmore = false;
@@ -12021,8 +12030,8 @@ interface DistributorInterface
  */
 class HashRing implements DistributorInterface, HashGeneratorInterface
 {
-    const DEFAULT_REPLICAS = 128;
-    const DEFAULT_WEIGHT   = 100;
+    public const DEFAULT_REPLICAS = 128;
+    public const DEFAULT_WEIGHT   = 100;
 
     private $ring;
     private $ringKeys;
@@ -12277,7 +12286,7 @@ class HashRing implements DistributorInterface, HashGeneratorInterface
  */
 class KetamaRing extends HashRing
 {
-    const DEFAULT_REPLICAS = 160;
+    public const DEFAULT_REPLICAS = 160;
 
     /**
      * @param mixed $nodeHashCallback Callback returning a string used to calculate the hash of nodes.
@@ -13133,7 +13142,7 @@ class KeyPrefixProcessor implements ProcessorInterface
                             }
                             break;
 
-                        case 'LIMIT';
+                        case 'LIMIT':
                             $i += 2;
                             break;
                     }
@@ -13402,7 +13411,8 @@ class ProtocolProcessor implements ProtocolProcessorInterface
 
             default:
                 CommunicationException::handle(new ProtocolException(
-                    $connection, "Unknown response prefix: '$prefix'."
+                    $connection,
+                    "Unknown response prefix: '$prefix'."
                 ));
 
                 return;
@@ -13533,17 +13543,17 @@ use InvalidArgumentException;
  */
 abstract class AbstractConsumer implements Iterator
 {
-    const SUBSCRIBE    = 'subscribe';
-    const UNSUBSCRIBE  = 'unsubscribe';
-    const PSUBSCRIBE   = 'psubscribe';
-    const PUNSUBSCRIBE = 'punsubscribe';
-    const MESSAGE      = 'message';
-    const PMESSAGE     = 'pmessage';
-    const PONG         = 'pong';
+    public const SUBSCRIBE    = 'subscribe';
+    public const UNSUBSCRIBE  = 'unsubscribe';
+    public const PSUBSCRIBE   = 'psubscribe';
+    public const PUNSUBSCRIBE = 'punsubscribe';
+    public const MESSAGE      = 'message';
+    public const PMESSAGE     = 'pmessage';
+    public const PONG         = 'pong';
 
-    const STATUS_VALID       = 1;	// 0b0001
-    const STATUS_SUBSCRIBED  = 2;	// 0b0010
-    const STATUS_PSUBSCRIBED = 4;	// 0b0100
+    public const STATUS_VALID       = 1;	// 0b0001
+    public const STATUS_SUBSCRIBED  = 2;	// 0b0010
+    public const STATUS_PSUBSCRIBED = 4;	// 0b0100
 
     private $position = null;
     private $statusFlags = self::STATUS_VALID;
@@ -13969,7 +13979,8 @@ class Consumer extends AbstractConsumer
     protected function writeRequest($method, $arguments)
     {
         $this->client->getConnection()->writeRequest(
-            $this->client->createCommand($method,
+            $this->client->createCommand(
+                $method,
                 Command::normalizeArguments($arguments)
             )
         );
@@ -14058,11 +14069,11 @@ use Predis\Protocol\ProtocolException;
  */
 class MultiExecState
 {
-    const INITIALIZED = 1;    // 0b00001
-    const INSIDEBLOCK = 2;    // 0b00010
-    const DISCARDED   = 4;    // 0b00100
-    const CAS         = 8;    // 0b01000
-    const WATCH       = 16;   // 0b10000
+    public const INITIALIZED = 1;    // 0b00001
+    public const INSIDEBLOCK = 2;    // 0b00010
+    public const DISCARDED   = 4;    // 0b00100
+    public const CAS         = 8;    // 0b01000
+    public const WATCH       = 16;   // 0b10000
 
     private $flags;
 
@@ -14562,7 +14573,8 @@ class MultiExec implements ClientContextInterface
             if ($execResponse === null) {
                 if ($attempts === 0) {
                     throw new AbortedMultiExecException(
-                        $this, 'The current transaction has been aborted by the server.'
+                        $this,
+                        'The current transaction has been aborted by the server.'
                     );
                 }
 
@@ -14636,7 +14648,8 @@ class MultiExec implements ClientContextInterface
         // connections we can safely assume that Predis\Client::getConnection()
         // will return a Predis\Connection\NodeConnectionInterface instance.
         CommunicationException::handle(new ProtocolException(
-            $this->client->getConnection(), $message
+            $this->client->getConnection(),
+            $message
         ));
     }
 }
